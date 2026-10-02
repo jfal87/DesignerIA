@@ -1,0 +1,763 @@
+﻿@page "/"
+@inject HttpClient Http
+@inject IJSRuntime JS
+@using DesignerIA.Contracts
+
+<PageTitle>DesignerIA</PageTitle>
+
+<div class="app-shell">
+    <header class="app-header">
+        <div class="app-header-brand">
+            <span class="app-header-brand-name">DesignerIA</span>
+            <span class="app-header-brand-tagline">Asistente para la creación de vistas de GestionEngine</span>
+        </div>
+        <div class="app-header-indicators">
+            <span class="status-badge @ClaseBadge(EstadoApi)"><span class="status-badge-dot"></span>API: @EtiquetaApi</span>
+            <span class="status-badge @ClaseBadge(EstadoGestionEngine)"><span class="status-badge-dot"></span>GestionEngine: @EtiquetaGestionEngine</span>
+            <span class="status-badge @ClaseBadge(EstadoCopilot)"><span class="status-badge-dot"></span>Copilot: @EtiquetaCopilot</span>
+        </div>
+    </header>
+
+    <div class="workspace-content">
+        <nav class="nav-rail">
+            <RadzenButton Text="+ Nueva conversación" ButtonStyle="Radzen.ButtonStyle.Light" Click="@NuevaConversacion" Disabled="@_enviando" />
+            <div class="nav-rail-placeholder">El historial de conversaciones estará disponible próximamente.</div>
+
+            <div class="nav-rail-secondary">
+                <button type="button" class="nav-rail-secondary-action" disabled="@_actualizandoConocimiento" @onclick="@ActualizarConocimientoAsync">
+                    @(_actualizandoConocimiento ? "Actualizando..." : "Actualizar conocimiento")
+                </button>
+                @if (_ultimoRebuild is not null)
+                {
+                    <span class="nav-rail-secondary-status">
+                        @(_ultimoRebuild.Status == "ok"
+                            ? $"{_ultimoRebuild.ChunksCreated} fragmentos de {_ultimoRebuild.FilesIndexed} documentos ({_ultimoRebuild.FilesUnsupported} no soportados)"
+                            : "No se pudo actualizar")
+                    </span>
+                }
+                <button type="button" class="nav-rail-secondary-action" @onclick="AbrirLaboratorioAsync">Laboratorio de conocimiento</button>
+            </div>
+        </nav>
+
+        <section class="chat-panel">
+            <RadzenCard Variant="Radzen.Variant.Flat" class="chat-scroll">
+                @if (_mensajes.Count == 0)
+                {
+                    <div>
+                        <RadzenText TextStyle="Radzen.Blazor.TextStyle.H4" class="chat-welcome-title">Hola, soy DesignerIA</RadzenText>
+                        <RadzenText TextStyle="Radzen.Blazor.TextStyle.Body1" class="chat-welcome-subtitle">
+                            Hoy puedo ayudarte con información básica y real de GestionEngine. Escribe tu pregunta o
+                            elige una de las siguientes opciones.
+                        </RadzenText>
+                        <div class="prompt-starters">
+                            @foreach (var starter in _promptStarters)
+                            {
+                                <button type="button" class="prompt-starter-chip" disabled="@_enviando" @onclick="@(() => EnviarStarterAsync(starter))">@starter</button>
+                            }
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    @foreach (var mensaje in _mensajes)
+                    {
+                        <div class="chat-message @(mensaje.EsUsuario ? "chat-message-user" : "chat-message-assistant") @(mensaje.EsError ? "chat-message-error" : "")">
+                            <span class="chat-message-author">@(mensaje.EsUsuario ? "Tú" : "DesignerIA")</span>
+                            @if (mensaje.EsCreacionVista && mensaje.VistaValida)
+                            {
+                                <div class="chat-createview-progress">
+                                    <div>Ok, prepararé la vista <strong>@mensaje.NombreVista</strong>.</div>
+                                    <div class="chat-createview-steps">
+                                        <span>✓ Solicitud interpretada</span>
+                                        <span>✓ Estructura generada</span>
+                                        <span>✓ Validación completada</span>
+                                        <span>✓ Vista lista para generar script</span>
+                                    </div>
+                                    <div class="chat-createview-notice">Vista preparada correctamente. Aún no se ha creado en GestionEngine.</div>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="chat-bubble">@mensaje.Texto</div>
+                            }
+                            @if (mensaje.ToolInvoked)
+                            {
+                                <span class="chat-message-meta">Consultado en GestionEngine</span>
+                            }
+                            @if (!mensaje.EsCreacionVista && mensaje.Fuentes is { Count: > 0 })
+                            {
+                                <div class="chat-sources">
+                                    <span class="chat-sources-title">Fuentes consultadas</span>
+                                    <ul class="chat-sources-list">
+                                        @foreach (var fuente in mensaje.Fuentes)
+                                        {
+                                            @if (fuente.SourceType == "Curated")
+                                            {
+                                                <li>
+                                                    <span class="chat-sources-curated-badge">Conocimiento del equipo</span>
+                                                    @fuente.Title
+                                                    @if (!string.IsNullOrWhiteSpace(fuente.Contributor))
+                                                    {
+                                                        <span class="chat-sources-file">(Aportado por: @fuente.Contributor)</span>
+                                                    }
+                                                </li>
+                                            }
+                                            else
+                                            {
+                                                <li>@fuente.Title <span class="chat-sources-file">(@fuente.SourceFile)</span></li>
+                                            }
+                                        }
+                                    </ul>
+                                </div>
+                            }
+                        </div>
+                    }
+
+                    @if (_enviando)
+                    {
+                        <div class="chat-working" role="status">
+                            <RadzenProgressBarCircular Mode="Radzen.ProgressBarMode.Indeterminate" Value="100" ShowValue="false" Style="width:1rem;height:1rem;" />
+                            <span>DesignerIA está trabajando...</span>
+                        </div>
+                    }
+                }
+            </RadzenCard>
+
+            <div class="composer">
+                <textarea class="composer-textarea" placeholder="Escribe tu pregunta para DesignerIA..." rows="1"
+                          @bind="_mensajeActual" @bind:event="oninput" disabled="@_enviando"></textarea>
+                <RadzenButton Text="Enviar" ButtonStyle="Radzen.ButtonStyle.Primary" Click="@EnviarAsync" Disabled="@(_enviando || string.IsNullOrWhiteSpace(_mensajeActual))">
+                    @if (_enviando)
+                    {
+                        <RadzenProgressBarCircular Mode="Radzen.ProgressBarMode.Indeterminate" Value="100" ShowValue="false" Style="width:1rem;height:1rem;margin-left:0.35rem;" />
+                    }
+                </RadzenButton>
+            </div>
+        </section>
+
+        <aside class="context-panel">
+            <RadzenCard Variant="Radzen.Variant.Flat">
+                <RadzenStack Gap="1.1rem">
+                    <div>
+                        <RadzenText TextStyle="Radzen.Blazor.TextStyle.Subtitle2" class="context-panel-section-title">GestionEngine</RadzenText>
+                        <div class="context-panel-row">
+                            <span class="status-badge @ClaseBadge(EstadoGestionEngine)"><span class="status-badge-dot"></span>@EtiquetaGestionEngine</span>
+                            <RadzenButton Text="Reintentar" ButtonStyle="Radzen.ButtonStyle.Light" Size="Radzen.ButtonSize.ExtraSmall" Click="@ConsultarEstadoBaseDatosAsync" Disabled="@_cargandoBaseDatos" />
+                        </div>
+                        @if (_estadoBaseDatos is not null)
+                        {
+                            <RadzenText TextStyle="Radzen.Blazor.TextStyle.Caption">Vistas registradas: @_estadoBaseDatos.ViewsCount</RadzenText>
+                        }
+                    </div>
+
+                    <div>
+                        <RadzenText TextStyle="Radzen.Blazor.TextStyle.Subtitle2" class="context-panel-section-title">Copilot</RadzenText>
+                        <span class="status-badge @ClaseBadge(EstadoCopilot)"><span class="status-badge-dot"></span>@EtiquetaCopilot</span>
+                    </div>
+
+                    <div>
+                        <RadzenText TextStyle="Radzen.Blazor.TextStyle.Subtitle2" class="context-panel-section-title">Sesión DesignerIA</RadzenText>
+                        @if (_cargandoIdentidadApi)
+                        {
+                            <RadzenText TextStyle="Radzen.Blazor.TextStyle.Caption">Verificando identidad...</RadzenText>
+                        }
+                        else if (_identidadApi is { IsAuthenticated: true })
+                        {
+                            <RadzenText TextStyle="Radzen.Blazor.TextStyle.Caption">@_identidadApi.Name</RadzenText>
+                            <RadzenText TextStyle="Radzen.Blazor.TextStyle.Caption">@_identidadApi.AuthenticationType</RadzenText>
+                        }
+                        else
+                        {
+                            <RadzenText TextStyle="Radzen.Blazor.TextStyle.Caption">No autenticada</RadzenText>
+                        }
+                    </div>
+
+                    <div>
+                        <RadzenText TextStyle="Radzen.Blazor.TextStyle.Subtitle2" class="context-panel-section-title">Vista en progreso</RadzenText>
+                        @if (_vistaEnProgreso is null)
+                        {
+                            <div class="artifact-placeholder">Sin vista en progreso</div>
+                        }
+                        else
+                        {
+                            <div class="viewspec-panel">
+                                <div class="viewspec-name">@(_vistaEnProgreso.Spec.Name ?? "(vista sin nombre)")</div>
+
+                                @foreach (var estado in _vistaEnProgreso.Spec.States ?? Array.Empty<ViewSpecState>())
+                                {
+                                    <div class="viewspec-state">
+                                        <div class="viewspec-state-title">
+                                            @(estado.Name ?? "(estado sin nombre)")
+                                            @if (!string.IsNullOrWhiteSpace(estado.Name) && string.Equals(estado.Name, _vistaEnProgreso.Spec.InitialState, StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                <span class="viewspec-badge">Estado inicial</span>
+                                            }
+                                        </div>
+                                        @foreach (var fila in estado.Rows ?? Array.Empty<ViewSpecRow>())
+                                        {
+                                            @foreach (var area in fila.Areas ?? Array.Empty<ViewSpecArea>())
+                                            {
+                                                <div class="viewspec-area">
+                                                    <div class="viewspec-area-type">@(area.Type ?? "Área")</div>
+                                                    <div class="viewspec-area-detail">Stored Procedure: @(area.StoredProcedure ?? "pendiente")</div>
+                                                    @foreach (var handler in area.Handlers ?? Array.Empty<ViewSpecHandler>())
+                                                    {
+                                                        <div class="viewspec-handler">@(handler.Type ?? "Handler") → @(handler.TargetState ?? "pendiente")</div>
+                                                    }
+                                                </div>
+                                            }
+                                        }
+                                    </div>
+                                }
+
+                                <div class="viewspec-validation">
+                                    <span class="context-panel-section-title">Validación</span>
+                                    @if (_vistaEnProgreso.Validation.IsValid && _vistaEnProgreso.Validation.Pending.Count == 0)
+                                    {
+                                        <div class="viewspec-validation-ok">✓ estructura válida</div>
+                                    }
+                                    else
+                                    {
+                                        <div class="viewspec-validation-warning">⚠ faltan datos</div>
+                                    }
+
+                                    @if (_vistaEnProgreso.Validation.Errors.Count > 0)
+                                    {
+                                        <ul class="viewspec-pending-list">
+                                            @foreach (var error in _vistaEnProgreso.Validation.Errors)
+                                            {
+                                                <li>@error</li>
+                                            }
+                                        </ul>
+                                    }
+
+                                    @if (_vistaEnProgreso.Validation.Pending.Count > 0)
+                                    {
+                                        <span class="viewspec-pending-title">Pendientes:</span>
+                                        <ul class="viewspec-pending-list">
+                                            @foreach (var pendiente in _vistaEnProgreso.Validation.Pending)
+                                            {
+                                                <li>@pendiente</li>
+                                            }
+                                        </ul>
+                                    }
+                                </div>
+
+                                @if (_vistaEnProgreso.KnowledgeGaps is { Count: > 0 })
+                                {
+                                    <div class="viewspec-knowledge-gaps">
+                                        <span class="context-panel-section-title">Conocimiento faltante</span>
+                                        @foreach (var gap in _vistaEnProgreso.KnowledgeGaps)
+                                        {
+                                            <div class="viewspec-knowledge-gap">
+                                                <div class="viewspec-knowledge-gap-topic">⚠ @gap.Topic</div>
+                                                <div class="viewspec-knowledge-gap-description">@gap.Description</div>
+                                                <button type="button" class="viewspec-knowledge-gap-action" @onclick="@(() => AbrirFormularioEnsenar(gap))">Enseñar a DesignerIA</button>
+                                            </div>
+                                        }
+                                    </div>
+                                }
+
+                                <div class="viewspec-actions">
+                                    <button type="button" class="viewspec-action"
+                                            disabled="@(_generandoScript || _vistaEnProgreso.Validation.Errors.Count > 0)"
+                                            title="@(_vistaEnProgreso.Validation.Errors.Count > 0 ? "La vista tiene errores estructurales" : "Generar script SQL de sólo previsualización")"
+                                            @onclick="GenerarScriptAsync">
+                                        @(_generandoScript ? "Generando..." : "Generar script")
+                                    </button>
+                                    <button type="button" class="viewspec-action-disabled" disabled title="Todavía no disponible">Crear vista</button>
+                                </div>
+
+                                @if (_resultadoScript is not null)
+                                {
+                                    <div class="viewscript-panel">
+                                        @if (_resultadoScript.CanGenerate)
+                                        {
+                                            <div class="viewscript-status-ok">Script generado. No ejecutado.</div>
+                                            <button type="button" class="viewscript-copy-button" @onclick="CopiarScriptAsync">Copiar</button>
+                                            <pre class="viewscript-code">@_resultadoScript.Script</pre>
+                                        }
+                                        else
+                                        {
+                                            <div class="viewscript-status-warning">No se puede generar todavía:</div>
+                                            <ul class="viewspec-pending-list">
+                                                @foreach (var gap in _resultadoScript.Gaps)
+                                                {
+                                                    <li><strong>@gap.Topic:</strong> @gap.Description</li>
+                                                }
+                                            </ul>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                </RadzenStack>
+            </RadzenCard>
+        </aside>
+    </div>
+</div>
+
+@if (_mostrarFormularioEnsenar)
+{
+    <div class="modal-overlay">
+        <div class="modal-dialog">
+            <div class="modal-title">Enseñar a DesignerIA</div>
+            <div class="modal-body">
+                <label class="modal-label">Tema</label>
+                <input class="modal-input" @bind="_temaEnsenar" />
+
+                <label class="modal-label">Explicación</label>
+                <textarea class="modal-textarea" rows="4" @bind="_explicacionEnsenar"></textarea>
+
+                <label class="modal-label">Ejemplo (opcional)</label>
+                <textarea class="modal-textarea" rows="2" @bind="_ejemploEnsenar"></textarea>
+
+                <label class="modal-label">Aportado por</label>
+                <input class="modal-input" @bind="_aportadoPorEnsenar" />
+
+                @if (!string.IsNullOrWhiteSpace(_mensajeEnsenar))
+                {
+                    <div class="modal-message">@_mensajeEnsenar</div>
+                }
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="modal-button-secondary" @onclick="CerrarFormularioEnsenar">Cerrar</button>
+                <button type="button" class="modal-button-primary" disabled="@_guardandoEnsenar" @onclick="GuardarConocimientoAsync">
+                    @(_guardandoEnsenar ? "Guardando..." : "Guardar para revisión")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_mostrarLaboratorio)
+{
+    <div class="modal-overlay">
+        <div class="modal-dialog modal-dialog-wide">
+            <div class="modal-title">Laboratorio de conocimiento</div>
+            <div class="modal-body">
+                @if (_cargandoLaboratorio)
+                {
+                    <div class="modal-message">Cargando...</div>
+                }
+                else if (_entradasPendientesLaboratorio.Count == 0)
+                {
+                    <div class="modal-message">No hay entradas pendientes de revisión.</div>
+                }
+                else
+                {
+                    @foreach (var entrada in _entradasPendientesLaboratorio)
+                    {
+                        <div class="lab-entry">
+                            <div class="lab-entry-topic">@entrada.Topic</div>
+                            <div class="lab-entry-content">@entrada.Content</div>
+                            @if (!string.IsNullOrWhiteSpace(entrada.Example))
+                            {
+                                <div class="lab-entry-example">Ejemplo: @entrada.Example</div>
+                            }
+                            <div class="lab-entry-meta">Aportado por: @entrada.Contributor · @entrada.CreatedAtUtc.ToLocalTime().ToString("g")</div>
+                            <input class="modal-input" placeholder="Revisado por" @bind="@_revisadoPorPorEntrada[entrada.Id]" />
+                            <div class="lab-entry-actions">
+                                <button type="button" class="modal-button-primary" @onclick="@(() => AprobarAsync(entrada.Id))">Aprobar</button>
+                                <button type="button" class="modal-button-secondary" @onclick="@(() => RechazarAsync(entrada.Id))">Rechazar</button>
+                            </div>
+                        </div>
+                    }
+                }
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="modal-button-secondary" @onclick="CerrarLaboratorio">Cerrar</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private readonly string[] _promptStarters =
+    {
+        "¿Cuántas vistas existen actualmente?",
+        "¿Qué puede hacer DesignerIA actualmente?",
+    };
+
+    private record ChatMessage(
+        string Texto,
+        bool EsUsuario,
+        bool ToolInvoked,
+        bool EsError,
+        IReadOnlyList<KnowledgeSourceReference>? Fuentes = null,
+        bool EsCreacionVista = false,
+        bool VistaValida = false,
+        string? NombreVista = null);
+
+    private readonly List<ChatMessage> _mensajes = new();
+    private string _mensajeActual = string.Empty;
+    private bool _enviando;
+    private ChatResult? _ultimoResultadoChat;
+
+    // Vive únicamente en memoria durante esta fase (sin persistencia): una nueva
+    // petición de creación de vista dentro de la misma página reemplaza la actual.
+    private ViewSpecResult? _vistaEnProgreso;
+
+    // ---- ViewScriptGen: generación determinística de SQL de sólo previsualización ----
+    private bool _generandoScript;
+    private ViewScriptGenerationResult? _resultadoScript;
+
+    private bool _actualizandoConocimiento;
+    private KnowledgeRebuildResult? _ultimoRebuild;
+
+    // ---- Enseñar a DesignerIA ----
+    private bool _mostrarFormularioEnsenar;
+    private string _temaEnsenar = string.Empty;
+    private string _explicacionEnsenar = string.Empty;
+    private string _ejemploEnsenar = string.Empty;
+    private string _aportadoPorEnsenar = string.Empty;
+    private bool _guardandoEnsenar;
+    private string? _mensajeEnsenar;
+
+    // ---- Laboratorio de conocimiento ----
+    private bool _mostrarLaboratorio;
+    private bool _cargandoLaboratorio;
+    private List<CuratedKnowledgeEntry> _entradasPendientesLaboratorio = new();
+    private readonly Dictionary<string, string> _revisadoPorPorEntrada = new();
+
+    private HealthStatus? _estado;
+    private bool _cargando = true;
+
+    private DatabaseHealthStatus? _estadoBaseDatos;
+    private bool _cargandoBaseDatos = true;
+
+    private IdentityStatus? _identidadApi;
+    private bool _cargandoIdentidadApi = true;
+
+    private string EstadoApi => _cargando ? "loading" : _estado is not null ? "ok" : "error";
+    private string EtiquetaApi => _cargando ? "Consultando..." : _estado is not null ? "Disponible" : "No disponible";
+
+    private string EstadoGestionEngine => _cargandoBaseDatos ? "loading" : _estadoBaseDatos is not null ? "ok" : "error";
+    private string EtiquetaGestionEngine => _cargandoBaseDatos ? "Consultando..." : _estadoBaseDatos is not null ? "Disponible" : "No disponible";
+
+    private string EstadoCopilot =>
+        _enviando ? "loading" :
+        _ultimoResultadoChat?.Status == "ok" ? "ok" :
+        _ultimoResultadoChat is not null ? "error" : "pending";
+
+    private string EtiquetaCopilot =>
+        _enviando ? "Procesando..." :
+        _ultimoResultadoChat?.Status == "ok" ? "Disponible" :
+        _ultimoResultadoChat is not null ? "Error" : "Sin probar";
+
+    private static string ClaseBadge(string estado) => estado switch
+    {
+        "ok" => "status-badge-ok",
+        "error" => "status-badge-error",
+        "loading" => "status-badge-loading",
+        _ => "status-badge-pending",
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Task.WhenAll(
+            ConsultarEstadoAsync(),
+            ConsultarEstadoBaseDatosAsync(),
+            ConsultarIdentidadApiAsync());
+    }
+
+    private async Task ConsultarEstadoAsync()
+    {
+        _cargando = true;
+        _estado = null;
+        try
+        {
+            _estado = await Http.GetFromJsonAsync<HealthStatus>("api/health");
+        }
+        catch
+        {
+            _estado = null;
+        }
+        finally
+        {
+            _cargando = false;
+        }
+    }
+
+    private async Task GenerarScriptAsync()
+    {
+        if (_vistaEnProgreso is null || _generandoScript)
+        {
+            return;
+        }
+
+        _generandoScript = true;
+        _resultadoScript = null;
+        try
+        {
+            var respuesta = await Http.PostAsJsonAsync("api/view-script/generate", _vistaEnProgreso.Spec);
+            if (respuesta.IsSuccessStatusCode)
+            {
+                _resultadoScript = await respuesta.Content.ReadFromJsonAsync<ViewScriptGenerationResult>();
+            }
+        }
+        catch
+        {
+            _resultadoScript = null;
+        }
+        finally
+        {
+            _generandoScript = false;
+        }
+    }
+
+    private async Task CopiarScriptAsync()
+    {
+        if (_resultadoScript?.Script is { Length: > 0 } script)
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", script);
+        }
+    }
+
+    private async Task ConsultarEstadoBaseDatosAsync()
+    {
+        _cargandoBaseDatos = true;
+        _estadoBaseDatos = null;
+        try
+        {
+            var respuesta = await Http.GetAsync("api/database/health");
+            if (respuesta.IsSuccessStatusCode)
+            {
+                _estadoBaseDatos = await respuesta.Content.ReadFromJsonAsync<DatabaseHealthStatus>();
+            }
+            else
+            {
+                _estadoBaseDatos = null;
+            }
+        }
+        catch
+        {
+            _estadoBaseDatos = null;
+        }
+        finally
+        {
+            _cargandoBaseDatos = false;
+        }
+    }
+
+    private async Task ConsultarIdentidadApiAsync()
+    {
+        _cargandoIdentidadApi = true;
+        _identidadApi = null;
+        try
+        {
+            var respuesta = await Http.GetAsync("api/health/identity");
+            if (respuesta.IsSuccessStatusCode)
+            {
+                _identidadApi = await respuesta.Content.ReadFromJsonAsync<IdentityStatus>();
+            }
+        }
+        catch
+        {
+            _identidadApi = null;
+        }
+        finally
+        {
+            _cargandoIdentidadApi = false;
+        }
+    }
+
+    private void NuevaConversacion()
+    {
+        _mensajes.Clear();
+        _mensajeActual = string.Empty;
+        _ultimoResultadoChat = null;
+        _vistaEnProgreso = null;
+    }
+
+    private Task EnviarStarterAsync(string texto)
+    {
+        _mensajeActual = texto;
+        return EnviarAsync();
+    }
+
+    private async Task EnviarAsync()
+    {
+        var texto = _mensajeActual.Trim();
+        if (string.IsNullOrWhiteSpace(texto) || _enviando)
+        {
+            return;
+        }
+
+        _mensajes.Add(new ChatMessage(texto, EsUsuario: true, ToolInvoked: false, EsError: false));
+        _mensajeActual = string.Empty;
+        _enviando = true;
+
+        try
+        {
+            var respuesta = await Http.PostAsJsonAsync("api/copilot/chat", new ChatRequest(texto));
+            var resultado = await respuesta.Content.ReadFromJsonAsync<ChatResult>();
+            _ultimoResultadoChat = resultado;
+
+            if (resultado is not null && resultado.Status == "ok")
+            {
+                var esCreacionVista = resultado.ViewSpecResult is not null;
+                _mensajes.Add(new ChatMessage(
+                    resultado.Response ?? string.Empty,
+                    EsUsuario: false,
+                    ToolInvoked: resultado.ToolInvoked,
+                    EsError: false,
+                    Fuentes: resultado.Sources,
+                    EsCreacionVista: esCreacionVista,
+                    VistaValida: resultado.ViewSpecResult?.Validation.IsValid == true && resultado.ViewSpecResult.Validation.Pending.Count == 0,
+                    NombreVista: resultado.ViewSpecResult?.Spec.Name));
+
+                if (resultado.ViewSpecResult is not null)
+                {
+                    _vistaEnProgreso = resultado.ViewSpecResult;
+                }
+            }
+            else
+            {
+                _mensajes.Add(new ChatMessage(resultado?.Error ?? "DesignerIA no pudo responder.", EsUsuario: false, ToolInvoked: false, EsError: true));
+            }
+        }
+        catch
+        {
+            _ultimoResultadoChat = new ChatResult("error", null, false, "No se pudo contactar a la Api.");
+            _mensajes.Add(new ChatMessage("No se pudo contactar a la Api.", EsUsuario: false, ToolInvoked: false, EsError: true));
+        }
+        finally
+        {
+            _enviando = false;
+        }
+    }
+
+    private async Task ActualizarConocimientoAsync()
+    {
+        if (_actualizandoConocimiento)
+        {
+            return;
+        }
+
+        _actualizandoConocimiento = true;
+        try
+        {
+            var respuesta = await Http.PostAsync("api/knowledge/rebuild", null);
+            _ultimoRebuild = await respuesta.Content.ReadFromJsonAsync<KnowledgeRebuildResult>();
+        }
+        catch
+        {
+            _ultimoRebuild = new KnowledgeRebuildResult("error", 0, 0, 0, 0, 0, 0, Error: "No se pudo contactar a la Api.");
+        }
+        finally
+        {
+            _actualizandoConocimiento = false;
+        }
+    }
+
+    private void AbrirFormularioEnsenar(ViewSpecKnowledgeGap gap)
+    {
+        _temaEnsenar = gap.Topic;
+        _explicacionEnsenar = string.Empty;
+        _ejemploEnsenar = string.Empty;
+        _aportadoPorEnsenar = string.Empty;
+        _mensajeEnsenar = null;
+        _mostrarFormularioEnsenar = true;
+    }
+
+    private void CerrarFormularioEnsenar()
+    {
+        _mostrarFormularioEnsenar = false;
+    }
+
+    private async Task GuardarConocimientoAsync()
+    {
+        if (_guardandoEnsenar)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_temaEnsenar) || string.IsNullOrWhiteSpace(_explicacionEnsenar) || string.IsNullOrWhiteSpace(_aportadoPorEnsenar))
+        {
+            _mensajeEnsenar = "Tema, Explicación y Aportado por son requeridos.";
+            return;
+        }
+
+        _guardandoEnsenar = true;
+        try
+        {
+            var request = new CuratedKnowledgeCreateRequest(
+                _temaEnsenar.Trim(),
+                _explicacionEnsenar.Trim(),
+                string.IsNullOrWhiteSpace(_ejemploEnsenar) ? null : _ejemploEnsenar.Trim(),
+                _aportadoPorEnsenar.Trim());
+
+            var respuesta = await Http.PostAsJsonAsync("api/knowledge/curated", request);
+            var resultado = await respuesta.Content.ReadFromJsonAsync<CuratedKnowledgeResult>();
+
+            _mensajeEnsenar = resultado?.Status == "ok"
+                ? "Conocimiento guardado para revisión. Todavía no será utilizado por DesignerIA."
+                : resultado?.Error ?? "No se pudo guardar el conocimiento aportado.";
+        }
+        catch
+        {
+            _mensajeEnsenar = "No se pudo contactar a la Api.";
+        }
+        finally
+        {
+            _guardandoEnsenar = false;
+        }
+    }
+
+    private async Task AbrirLaboratorioAsync()
+    {
+        _mostrarLaboratorio = true;
+        await CargarPendientesLaboratorioAsync();
+    }
+
+    private void CerrarLaboratorio()
+    {
+        _mostrarLaboratorio = false;
+    }
+
+    private async Task CargarPendientesLaboratorioAsync()
+    {
+        _cargandoLaboratorio = true;
+        try
+        {
+            var jsonOptions = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+            jsonOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+            var resultado = await Http.GetFromJsonAsync<CuratedKnowledgeListResult>("api/knowledge/curated?status=Pending", jsonOptions);
+            _entradasPendientesLaboratorio = resultado?.Entries?.ToList() ?? new List<CuratedKnowledgeEntry>();
+        }
+        catch
+        {
+            _entradasPendientesLaboratorio = new List<CuratedKnowledgeEntry>();
+        }
+        finally
+        {
+            _cargandoLaboratorio = false;
+        }
+    }
+
+    private async Task AprobarAsync(string id)
+    {
+        var revisadoPor = _revisadoPorPorEntrada.GetValueOrDefault(id, string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(revisadoPor))
+        {
+            return;
+        }
+
+        await Http.PostAsJsonAsync($"api/knowledge/curated/{id}/approve", new CuratedKnowledgeReviewRequest(revisadoPor));
+        await CargarPendientesLaboratorioAsync();
+    }
+
+    private async Task RechazarAsync(string id)
+    {
+        var revisadoPor = _revisadoPorPorEntrada.GetValueOrDefault(id, string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(revisadoPor))
+        {
+            return;
+        }
+
+        await Http.PostAsJsonAsync($"api/knowledge/curated/{id}/reject", new CuratedKnowledgeReviewRequest(revisadoPor));
+        await CargarPendientesLaboratorioAsync();
+    }
+}

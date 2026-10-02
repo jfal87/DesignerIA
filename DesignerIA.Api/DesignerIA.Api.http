@@ -1,0 +1,6 @@
+@DesignerIA.Api_HostAddress = http://localhost:5268
+
+GET {{DesignerIA.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
