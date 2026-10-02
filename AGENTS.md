@@ -4,11 +4,7 @@
 
 Este archivo define **cómo debe trabajar cualquier agente de desarrollo dentro de DesignerIA**.
 
-No describe una tarea puntual, un checkpoint ni una feature específica.
-
-Las tareas concretas, endpoints, pruebas, contratos esperados y alcance funcional deben llegar en el **prompt de trabajo**.
-
-Regla mental:
+No describe una tarea puntual. Las features, endpoints, pruebas, contratos y alcance funcional llegan en el **prompt de trabajo**.
 
 ```text
 AGENTS.md = cómo trabajar siempre
@@ -19,9 +15,9 @@ El agente debe cumplir ambos.
 
 ---
 
-## 2. Fuente de verdad y alcance local
+## 2. Ruta autorizada y fuentes de verdad
 
-La única ruta autorizada para el desarrollo local es:
+Ruta autorizada:
 
 ```text
 C:\Code\DesignerAI
@@ -31,11 +27,12 @@ Fuentes de verdad, en este orden:
 
 1. instrucción actual del usuario;
 2. este `AGENTS.md`;
-3. código y configuración existentes dentro de `C:\Code\DesignerAI`.
+3. código/configuración dentro de `C:\Code\DesignerAI`;
+4. evidencia autorizada dentro de `C:\Code\DesignerAI\KnowledgeSource`.
 
-No inspeccionar, copiar, reutilizar ni adaptar código de otros proyectos locales o repositorios externos para ahorrar trabajo.
+No inspeccionar ni reutilizar código de otros proyectos locales o repositorios externos para ahorrar trabajo.
 
-No utilizar como referencia interna:
+No usar directamente como referencia interna:
 
 - Lumed;
 - Portal;
@@ -43,43 +40,34 @@ No utilizar como referencia interna:
 - Designer;
 - Motor;
 - otros proyectos bajo `C:\Code`;
-- repositorios de GitHub;
-- Azure DevOps;
-- Azure Repos;
+- GitHub/Azure Repos;
 - proyectos de terceros.
 
-Si aparece información incidental de otro proyecto, ignorarla.
+Puede consultarse documentación pública oficial de dependencias ya autorizadas.
 
-Para aclarar una API pública de una dependencia ya autorizada, se puede consultar **documentación pública oficial del proveedor**.
-
-No decompilar DLLs, no usar ILSpy, reflexión exploratoria, herramientas auxiliares de ingeniería inversa ni inspeccionar cachés globales de NuGet.
-
-
-### 2.1 `KnowledgeSource` como evidencia autorizada
-
-La carpeta:
-
-```text
-C:\Code\DesignerAI\KnowledgeSource
-```
-
-puede contener documentación, Wiki, scripts SQL exportados, ejemplos reales y copias aisladas de código fuente usadas exclusivamente como **evidencia de dominio**.
-
-Reglas:
-
-- el agente puede leer y analizar estas fuentes porque están dentro de la ruta autorizada de DesignerIA;
-- `KnowledgeSource` es evidencia/referencia, no código productivo de DesignerIA;
-- no compilar, referenciar como proyecto, enlazar ni incorporar directamente archivos de `KnowledgeSource` al runtime de DesignerIA salvo autorización explícita;
-- no copiar código antiguo de forma mecánica: extraer reglas de dominio y reimplementarlas de forma simple, controlada y consistente con DesignerIA;
-- para comportamiento técnico, preferir evidencia directa de implementación y artefactos reales producidos por el sistema sobre interpretaciones documentales cuando exista una contradicción;
-- conservar y documentar contradicciones entre fuentes; no ocultarlas ni resolverlas inventando una regla;
-- una instrucción explícita del usuario sobre el ambiente o alcance actual siempre tiene prioridad.
+No decompilar DLLs, usar ILSpy, reflexión exploratoria ni inspeccionar cachés globales de NuGet.
 
 ---
 
-## 3. Stack y arquitectura base
+## 3. `KnowledgeSource`
 
-DesignerIA es una solución .NET 10 compuesta por:
+`C:\Code\DesignerAI\KnowledgeSource` puede contener Wiki, scripts SQL, ejemplos reales, documentación y copias aisladas de código usadas únicamente como **evidencia de dominio**.
+
+Reglas:
+
+- se puede leer y analizar;
+- no es código productivo;
+- no compilarlo ni referenciarlo desde runtime;
+- no copiar código viejo mecánicamente;
+- extraer reglas y reimplementarlas en DesignerIA;
+- preferir evidencia directa de implementación/artefactos reales sobre documentación interpretativa cuando se contradigan;
+- documentar contradicciones;
+- no inventar reglas para resolver huecos;
+- no publicarlo en Git.
+
+---
+
+## 4. Stack y arquitectura
 
 ```text
 DesignerIA.slnx
@@ -88,17 +76,16 @@ DesignerIA.slnx
 └── DesignerIA.Contracts
 ```
 
-Stack base:
+Stack:
 
 - .NET 10;
 - C#;
-- Visual Studio 2026;
 - Blazor WebAssembly;
 - ASP.NET Core Web API;
 - Radzen.Blazor;
 - CSS propio;
 - `Microsoft.Data.SqlClient`;
-- GitHub Copilot SDK cuando la tarea lo requiera.
+- GitHub Copilot SDK cuando aplique.
 
 Dependencias:
 
@@ -106,32 +93,41 @@ Dependencias:
 DesignerIA.Web       -> DesignerIA.Contracts
 DesignerIA.Api       -> DesignerIA.Contracts
 DesignerIA.Web       -X-> DesignerIA.Api como referencia de proyecto
-DesignerIA.Web       -> DesignerIA.Api únicamente mediante HTTP
+DesignerIA.Web       -> DesignerIA.Api sólo por HTTP
 ```
 
-`DesignerIA.Web` nunca debe conectarse directamente a SQL ni al GitHub Copilot SDK.
+Reglas:
 
-SQL y Copilot deben vivir exclusivamente en `DesignerIA.Api`.
-
-No crear proyectos nuevos ni cambiar esta arquitectura sin autorización explícita.
+- Web nunca se conecta directo a SQL;
+- Web nunca usa directo el Copilot SDK;
+- SQL y Copilot viven en API;
+- DTOs compartidos viven en Contracts;
+- no crear proyectos ni cambiar arquitectura sin autorización explícita.
 
 ---
 
-## 4. Principio de diseño
+## 5. Filosofía de trabajo
+
+Preferir la solución más simple que resuelva correctamente el problema.
+
+**Una tarea pequeña debe producir un cambio pequeño.**
 
 El código debe ser:
 
 - simple;
 - explícito;
-- legible por humanos;
+- legible;
+- mantenible;
+- predecible;
 - consistente;
 - fácil de depurar;
-- fácil de modificar;
-- preparado para crecer sin sobrearquitectura.
+- suficiente para el requerimiento actual.
 
 Preferir **código aburrido y evidente** sobre código ingenioso.
 
-No usar una solución compleja cuando una solución directa resuelve correctamente el problema.
+Más código no significa una solución más profesional.
+
+Antes de crear algo nuevo, revisar cómo DesignerIA resuelve una responsabilidad equivalente.
 
 Evitar salvo necesidad real:
 
@@ -144,192 +140,244 @@ Evitar salvo necesidad real:
 - wrappers triviales;
 - microservicios;
 - herencia innecesaria;
-- reflexión;
-- metaprogramación;
+- reflexión/metaprogramación;
 - service locator;
-- helpers genéricos sin una necesidad concreta;
-- abstracciones creadas únicamente "por si sirven después".
+- helpers genéricos sin necesidad;
+- abstracciones "por si acaso";
+- refactors no solicitados;
+- cambios cosméticos ajenos;
+- generalizaciones prematuras.
 
 Escalable no significa agregar capas anticipadamente.
 
-Escalable significa mantener responsabilidades claras para que una pieza pueda evolucionar sin romper las demás.
+---
+
+## 6. Evidencia antes que suposición
+
+Antes de modificar:
+
+1. localizar el flujo actual;
+2. identificar archivos/símbolos involucrados;
+3. revisar casos equivalentes;
+4. rastrear el dato entre capas;
+5. revisar `KnowledgeSource` cuando aplique;
+6. distinguir hechos de hipótesis.
+
+No asumir que una funcionalidad existe porque aparece un parámetro, columna, componente, tabla, SP, DTO o nombre parecido.
+
+Clasificar hallazgos como:
+
+- confirmado;
+- inferido;
+- hipótesis;
+- pendiente;
+- falta evidencia;
+- bloqueado por falta de evidencia.
+
+No convertir hipótesis en decisiones arquitectónicas.
+
+Si código, SQL, configuración, documentación o evidencia se contradicen, reportarlo. No corregirlo silenciosamente.
 
 ---
 
-## 5. Consistencia y estándares de programación
+## 7. Modos de trabajo
 
-La solución debe mantenerse **homogénea**.
+### 7.1 Análisis — READ-ONLY
 
-Responsabilidades equivalentes deben resolverse con el mismo patrón mientras ese patrón siga siendo válido.
+Cuando el usuario diga `analiza`, `revisa`, `investiga`, `diagnostica`, `inspecciona`, `compara` o equivalente, trabajar READ-ONLY.
 
-Antes de implementar algo nuevo, revisar cómo DesignerIA resuelve una responsabilidad equivalente y seguir ese estilo.
+Puede hacer automáticamente:
 
-No hacer esto:
+- leer archivos;
+- listar carpetas;
+- buscar referencias;
+- inspeccionar código/configuración/SQL local;
+- comparar archivos;
+- Git de lectura;
+- documentación pública oficial autorizada;
+- SQL READ-ONLY sólo si servidor, base y autenticación fueron autorizados para esa tarea.
+
+No pedir autorización para lecturas rutinarias.
+
+Durante análisis no:
+
+- modificar archivos;
+- generar artefactos dentro del workspace;
+- hacer restore/build;
+- instalar dependencias;
+- ejecutar SQL de escritura;
+- ejecutar SP funcionales;
+- modificar Git;
+- tocar Azure;
+- desplegar.
+
+Una solicitud de análisis **no autoriza implementación**.
+
+### 7.2 Autonomía READ-ONLY
+
+Regla:
+
+> Si una operación no modifica estado, está dentro del alcance autorizado y sirve a la tarea, ejecutarla sin preguntar.
+
+Incluye:
 
 ```text
-Controller A -> Service -> SQL
-Controller B -> 200 líneas de lógica + SQL dentro del Controller
+git status
+git status --short
+git diff
+git diff --check
+git log
+git show
+git branch --show-current
+git remote -v
 ```
 
-La misma responsabilidad debe resolverse de forma consistente.
+y, cuando SQL READ-ONLY esté autorizado:
 
-### 5.1 C#
+```text
+SELECT
+TOP
+COUNT
+INFORMATION_SCHEMA
+sys.*
+OBJECT_DEFINITION
+sys.sql_modules
+```
 
-Usar convenciones estándar de .NET/C# y las configuraciones existentes del proyecto.
+No preguntar "¿puedo leer/buscar/ejecutar git status/ejecutar este SELECT?" si ya está autorizado.
 
-Reglas:
+**La herramienta no determina el riesgo. El efecto de la operación sí.**
 
-- `PascalCase` para tipos, propiedades y métodos públicos;
-- `camelCase` para parámetros y variables locales;
-- nombres descriptivos, no abreviaturas crípticas;
+### 7.3 Implementación
+
+Cuando el usuario diga `implementa`, `hazlo`, `corrige`, `ajusta`, `agrega` o `modifica`, puede editar lo necesario dentro del alcance.
+
+Puede:
+
+- crear/modificar archivos necesarios;
+- crear carpetas;
+- agregar clases/DTOs/Services/componentes;
+- `dotnet restore` si no agrega dependencias nuevas;
+- `dotnet build`;
+- `dotnet run`;
+- probar endpoints locales;
+- corregir errores introducidos por sus propios cambios.
+
+No pedir autorización por cada edición rutinaria.
+
+No aprovechar para:
+
+- refactorizar módulos vecinos;
+- renombrar cosas no relacionadas;
+- modernizar código;
+- corregir warnings históricos;
+- eliminar código aparentemente muerto;
+- cambiar estilos no solicitados;
+- introducir patrones nuevos sin necesidad.
+
+Una implementación no autoriza Git de escritura, Azure, deploy, SQL de escritura, dependencias nuevas ni cambios de autenticación.
+
+---
+
+## 8. Estándares C#
+
+- `PascalCase` para tipos/miembros públicos;
+- `camelCase` para locales/parámetros;
+- nombres descriptivos;
 - métodos async terminan en `Async`;
 - usar `async/await` para I/O;
-- propagar `CancellationToken` cuando exista una operación I/O relevante y el flujo actual lo soporte;
-- evitar métodos excesivamente largos;
-- evitar clases gigantes con múltiples responsabilidades;
+- propagar `CancellationToken` cuando tenga sentido;
+- evitar clases/métodos gigantes;
 - no duplicar lógica;
-- no ocultar comportamiento importante dentro de extensiones o helpers innecesarios;
-- no introducir patrones distintos para el mismo problema sin una razón técnica clara.
+- no crear interfaces por costumbre.
 
-No crear una interfaz para cada servicio por costumbre.
+Crear interfaz sólo si existe razón real: varias implementaciones, contrato reutilizable, desacoplamiento claro o estrategia de pruebas que lo justifique.
 
-Crear interfaces únicamente cuando exista una razón real, por ejemplo:
+### Controllers
 
-- varias implementaciones;
-- contrato reutilizable real;
-- necesidad clara de desacoplamiento;
-- estrategia de pruebas que realmente lo justifique.
-
-### 5.2 Controllers
-
-Los Controllers deben ser delgados.
-
-Responsabilidades permitidas:
+Deben ser delgados:
 
 ```text
 HTTP request
-   -> validación de transporte mínima
-   -> llamada a Service
-   -> HTTP response
+ -> validación de transporte mínima
+ -> Service
+ -> HTTP response
 ```
 
-No colocar en Controllers:
+No SQL, Copilot SDK, reglas de dominio ni lógica compleja en Controllers.
 
-- acceso SQL;
-- lógica del Copilot SDK;
-- lógica de negocio importante;
-- procesamiento complejo;
-- construcción extensa de objetos;
-- reglas de dominio.
+### Services
 
-Si existe lógica real, moverla a un Service específico.
+Un Service debe tener responsabilidad clara y específica.
 
-### 5.3 Services
-
-Crear Services únicamente para responsabilidades reales.
-
-Un Service debe:
-
-- tener un nombre específico;
-- tener una responsabilidad clara;
-- concentrar lógica relacionada;
-- ser pequeño y legible;
-- usar DI cuando dependa de otras capacidades.
-
-No crear cadenas artificiales como:
+Evitar:
 
 ```text
 Controller -> Manager -> Handler -> Processor -> Service -> Repository
 ```
 
-si un simple:
+si basta:
 
 ```text
 Controller -> Service
 ```
 
-es suficiente.
+---
 
-### 5.4 Acceso a datos
+## 9. SQL y acceso a datos
 
-Todo acceso SQL debe estar fuera de Controllers y componentes Razor.
-
-Patrón esperado:
+Patrón:
 
 ```text
 Controller / Tool
-       -> Service C#
-            -> Microsoft.Data.SqlClient
-                 -> SQL Server
+ -> Service C#
+ -> Microsoft.Data.SqlClient
+ -> SQL Server
 ```
 
 Reglas:
 
-- usar parámetros SQL;
-- nunca concatenar input externo dentro del SQL;
-- no duplicar una consulta ya existente si un servicio actual devuelve el mismo dato limpiamente;
+- parámetros SQL para SQL ejecutado;
+- nunca concatenar input externo;
 - no exponer connection strings;
-- no descubrir servidores o bases automáticamente;
-- no acceder a otra base o servidor sólo porque sea técnicamente posible;
-- lectura SQL es el comportamiento por defecto;
-- cualquier escritura SQL requiere autorización explícita en el prompt actual.
+- no descubrir servidores/bases automáticamente;
+- lectura es el default;
+- escritura SQL requiere autorización explícita.
 
+### SQL ejecutado vs SQL generado
 
-### 5.4.1 SQL ejecutado vs. SQL generado
-
-Distinguir siempre entre:
+Distinguir siempre:
 
 ```text
 SQL ejecutado por DesignerIA
 ```
 
-y:
+de:
 
 ```text
 script SQL generado como artefacto
 ```
 
-Para SQL que DesignerIA ejecuta contra una base:
+Para scripts generados:
 
-- usar parámetros SQL;
-- nunca concatenar input externo;
-- mantener lectura como comportamiento por defecto;
-- cualquier escritura requiere autorización explícita en el prompt actual.
+- generación determinística en C#;
+- texto externo siempre escapado;
+- mecanismo central de escape;
+- Copilot nunca genera SQL arbitrario libre;
+- generar script no autoriza ejecutarlo.
 
-Para scripts SQL que DesignerIA genera pero **no ejecuta**:
+### Compatibilidad GestionEngine
 
-- la salida debe construirse de forma determinística desde C# controlado;
-- nunca insertar texto externo crudo dentro de literales SQL;
-- todo valor textual debe pasar por el mecanismo de escape central definido por DesignerIA;
-- no permitir que Copilot produzca SQL arbitrario como texto libre;
-- generar un script no autoriza ejecutarlo.
+Todo SQL generado debe ser compatible, como mínimo, con **SQL Server 2008 R2** salvo autorización explícita distinta.
 
-### 5.4.2 Compatibilidad del SQL generado para GestionEngine
-
-Todo script SQL generado por DesignerIA para GestionEngine debe ser compatible, como mínimo, con **Microsoft SQL Server 2008 R2**, salvo que el prompt actual autorice explícitamente un nivel de compatibilidad superior para un ambiente concreto.
-
-La compatibilidad con SQL Server 2008 R2 forma parte de la corrección del script.
-
-Un script no se considera válido para GestionEngine si únicamente funciona en una versión moderna de SQL Server cuando debe poder utilizarse en ambientes legacy.
-
-Reglas permanentes:
-
-- no asumir que la versión de SQL Server usada localmente representa la versión de los ambientes destino;
-- no modernizar T-SQL por iniciativa propia;
-- cuando existan varias formas equivalentes de expresar una operación, preferir la variante compatible con SQL Server 2008 R2;
-- preferir patrones comprobados en scripts reales de Designer disponibles en `KnowledgeSource`;
-- tratar configuraciones JSON como texto cuando el modelo de GestionEngine así lo haga;
-- no introducir sintaxis posterior a SQL Server 2008 R2 salvo autorización explícita y evidencia de compatibilidad del ambiente destino;
-- si existe duda sobre compatibilidad, mantener el script conservador o reportar la duda; no asumir soporte por haber compilado contra una instancia moderna.
-
-Evitar por defecto construcciones posteriores a SQL Server 2008 R2, entre otras:
+Evitar por defecto:
 
 - `DROP TABLE IF EXISTS`;
 - `THROW`;
 - `TRY_CONVERT`;
 - `IIF`;
 - `CONCAT`;
-- `OFFSET / FETCH`;
+- `OFFSET/FETCH`;
 - `SEQUENCE`;
 - `DATEFROMPARTS`;
 - `EOMONTH`;
@@ -340,95 +388,68 @@ Evitar por defecto construcciones posteriores a SQL Server 2008 R2, entre otras:
 - `STRING_AGG`;
 - `CREATE OR ALTER`.
 
-Cuando corresponda y exista evidencia de dominio, preferir patrones clásicos compatibles, por ejemplo:
+Preferir patrones clásicos comprobados en evidencia real.
 
-- `IF OBJECT_ID(...) IS NOT NULL` seguido de `DROP`;
-- `BEGIN TRY` / `BEGIN CATCH`;
-- `BEGIN TRANSACTION` / `COMMIT` / `ROLLBACK`;
-- variables T-SQL tradicionales;
-- `ISNULL`;
-- `MAX(...)`;
-- configuración serializada almacenada como texto.
-
-### 5.4.3 Modelo lógico y ambiente
-
-La definición lógica de una vista no debe acoplarse a detalles físicos de un ambiente.
-
-Regla conceptual:
+### Modelo lógico vs ambiente
 
 ```text
 ViewSpec = qué es la vista
-Ambiente / contexto de generación = dónde y cómo se materializa
+Ambiente = dónde/cómo se materializa
 ```
 
-Por lo tanto:
+No meter servidor, base, connection string o versión SQL dentro del modelo lógico sin necesidad real.
 
-- `ViewSpec` describe la estructura y comportamiento lógico de la vista;
-- prefijos de metadata como `MTDE_`, acceso por tres capas, servidor, base, connection string física, versión de SQL Server y demás diferencias de ambiente no deben incorporarse al modelo lógico salvo que una necesidad real lo justifique;
-- `prefijoModeloDatos` y el uso de three layers son conceptos independientes;
-- no inferir uno a partir del otro;
-- no inferir configuración de ambiente si no está explícitamente definida;
-- mientras una tarea trabaje con un solo ambiente autorizado, no crear abstracciones multiambiente por anticipación;
-- una futura abstracción de ambiente sólo debe introducirse cuando exista un requerimiento concreto.
-
-### 5.5 GitHub Copilot SDK
-
-Copilot es una capacidad del backend, no una puerta abierta al sistema.
-
-Patrón esperado:
-
-```text
-Copilot
-   -> custom tool explícita
-        -> Service C# controlado
-             -> capacidad autorizada
-```
-
-Reglas permanentes:
-
-- no dar a Copilot acceso SQL genérico;
-- no permitir que el modelo construya consultas arbitrarias para ejecutarlas;
-- no habilitar shell, filesystem, Git, web, MCP, skills u otras tools por defecto;
-- usar allowlists explícitas de tools;
-- cada tool debe representar una capacidad pequeña y concreta;
-- una tool no debe recibir parámetros que amplíen su autoridad innecesariamente;
-- una tool read-only puede evitar confirmación sólo si su implementación está completamente controlada y no tiene efectos secundarios;
-- no usar `PermissionHandler.ApproveAll` para simplificar;
-- no pedir, copiar o guardar PATs, API keys, tokens o passwords;
-- no ejecutar `copilot login` o `copilot logout` desde DesignerIA;
-- reutilizar mecanismos oficiales de autenticación únicamente cuando la tarea los autorice.
+No crear multiambiente por anticipación.
 
 ---
 
-## 6. Contracts
+## 10. GitHub Copilot SDK
 
-Los DTOs compartidos entre Web y Api deben vivir en:
+Copilot es capacidad del backend, no acceso general al sistema.
+
+```text
+Copilot
+ -> custom tool explícita
+ -> Service C# controlado
+ -> capacidad autorizada
+```
+
+Reglas:
+
+- no SQL genérico;
+- no consultas arbitrarias ejecutables;
+- no shell/filesystem/Git/web/MCP/skills por defecto;
+- allowlist explícita de tools;
+- tools pequeñas y concretas;
+- no `PermissionHandler.ApproveAll`;
+- no pedir/guardar PAT, keys, tokens o passwords;
+- no `copilot login/logout` desde DesignerIA.
+
+La semántica puede ir al modelo.
+
+Reglas, validaciones, autorización, SQL, seguridad y efectos secundarios deben quedar en C# determinístico.
+
+---
+
+## 11. Contracts
+
+DTOs compartidos:
 
 ```text
 DesignerIA.Contracts
 ```
 
-No duplicar el mismo contrato en Web y Api.
+No duplicarlos en Web/API.
 
-Los Contracts deben ser simples.
+Contracts simples, sólo datos que crucen HTTP.
 
-Deben contener únicamente datos que realmente crucen la frontera HTTP entre aplicaciones.
-
-No colocar lógica de negocio dentro de Contracts.
+Sin lógica de negocio.
 
 ---
 
-## 7. Frontend
+## 12. Frontend
 
-La interfaz debe ser:
-
-- moderna;
-- sobria;
-- corporativa;
-- limpia;
-- responsive;
-- consistente;
-- preparada para branding futuro.
+Debe ser moderno, sobrio, corporativo, limpio, responsive y consistente.
 
 Tecnología:
 
@@ -436,223 +457,65 @@ Tecnología:
 Blazor WebAssembly + Radzen.Blazor + CSS propio
 ```
 
-Radzen es una librería de componentes, no la arquitectura visual completa.
+Razor se concentra en UI, interacción, llamadas HTTP y presentación.
 
-Usar CSS propio y variables de diseño para mantener control sobre el look & feel.
+No lógica de negocio, SQL ni SDK en `.razor`.
 
-Los textos visibles para el usuario deben estar en español.
+Dirección UX: workspace empresarial asistido por IA, no chatbot genérico.
 
-Los componentes Razor deben concentrarse en:
-
-- estado de UI;
-- interacción del usuario;
-- llamadas HTTP;
-- presentación.
-
-No colocar lógica de negocio, SQL ni lógica del SDK dentro de `.razor`.
-
-Cuando una pantalla crezca, extraer responsabilidades sólo cuando exista una necesidad concreta.
-
-### Dirección UX
-
-DesignerIA debe evolucionar como un **workspace empresarial asistido por IA**, no como un chatbot genérico.
-
-La dirección visual contempla progresivamente:
-
-- navegación/historial lateral;
-- área central de conversación;
-- composer amplio;
-- prompt starters;
-- resultados estructurados mediante cards;
-- panel de artifact para mostrar la vista que se está construyendo;
-- estados visibles de API, datos e IA;
-- acciones contextuales;
-- progreso/streaming cuando corresponda;
-- feedback del usuario.
-
-Evitar:
-
-- apariencia de formulario administrativo viejo;
-- chatbot flotante como experiencia principal;
-- exceso de modales;
-- exceso de bordes;
-- controles visuales inconsistentes;
-- mostrar detalles técnicos innecesarios al usuario final.
-
-Esta dirección UX no autoriza implementar features que el prompt actual no solicite.
+Evitar modales/bordes excesivos, inconsistencia visual y detalles técnicos innecesarios.
 
 ---
 
-## 8. Logging y observabilidad
+## 13. Logging
 
-Los logs son parte obligatoria de cualquier funcionalidad relevante.
+Usar `ILogger<T>`.
 
-Objetivo:
+Logs técnicos en inglés; UI en español.
 
-```text
-si algo falla -> poder saber qué operación falló, dónde falló y por qué
-```
+Registrar eventos significativos: SQL, Copilot, tools, auth, timeouts, excepciones y respuestas inesperadas.
 
-Usar el sistema estándar de logging de ASP.NET Core:
-
-```csharp
-ILogger<T>
-```
-
-No agregar Serilog, Application Insights u otra dependencia de logging salvo autorización explícita.
-
-Los mensajes técnicos de log deben escribirse en inglés.
-
-La UI continúa en español.
-
-### 8.1 Qué registrar
-
-Registrar eventos significativos, especialmente en fronteras del sistema:
-
-- inicio o final relevante de operaciones externas cuando aporte valor;
-- llamadas a SQL;
-- llamadas al GitHub Copilot SDK;
-- invocación de custom tools;
-- fallos de autenticación controlados;
-- timeouts;
-- excepciones;
-- respuestas inesperadas de dependencias;
-- operaciones cuyo diagnóstico posterior sería difícil sin contexto.
-
-No registrar cada línea o cada método trivial.
-
-### 8.2 Niveles
-
-Usar niveles de forma consistente:
-
-```text
-Debug       -> detalle útil únicamente para diagnóstico local
-Information -> evento normal y relevante del flujo
-Warning     -> condición inesperada pero recuperable
-Error       -> operación fallida
-Critical    -> fallo grave de la aplicación, sólo cuando realmente corresponda
-```
-
-No convertir fallos normales/controlados en `Critical`.
-
-### 8.3 Logs estructurados
-
-Preferir templates estructurados:
-
-```csharp
-_logger.LogInformation(
-    "Copilot metadata tool completed in {ElapsedMs} ms. ViewsCount: {ViewsCount}",
-    elapsedMs,
-    viewsCount);
-```
-
-Evitar:
-
-```csharp
-_logger.LogInformation($"Terminó todo y dio {viewsCount}");
-```
-
-Usar nombres de propiedades consistentes entre logs.
-
-Cuando sea útil incluir:
-
-- operación;
-- duración;
-- endpoint/capacidad;
-- resultado;
-- identificador seguro;
-- conteos;
-- tipo de error.
-
-### 8.4 Errores
-
-Cuando se capture una excepción relevante, registrar la excepción completa mediante `ILogger` para conservar stack trace:
-
-```csharp
-_logger.LogError(
-    ex,
-    "Failed to retrieve GestionEngine metadata");
-```
-
-La respuesta HTTP al Front debe seguir siendo controlada y no exponer el stack trace.
-
-### 8.5 Información prohibida en logs
+Preferir logs estructurados.
 
 Nunca registrar:
 
 - passwords;
 - tokens;
 - cookies;
-- headers `Authorization`;
+- `Authorization`;
 - connection strings completas;
 - secretos;
-- credenciales;
-- prompts completos que puedan contener información sensible;
-- respuestas completas de IA si pueden contener información interna innecesaria;
-- datos sensibles sólo "por si luego sirven".
-
-Registrar el mínimo contexto seguro necesario para diagnosticar.
-
-### 8.6 Correlación
-
-Usar primero las capacidades estándar de ASP.NET Core (`TraceIdentifier`, scopes o contexto HTTP) cuando se necesite correlacionar una operación.
-
-No crear un framework propio de correlation IDs salvo necesidad real.
+- prompts/respuestas completas sensibles.
 
 ---
 
-## 9. Manejo de errores
+## 14. Errores
 
-Los errores deben manejarse de forma consistente.
-
-Reglas:
-
-- no esconder excepciones silenciosamente;
-- no usar `catch { }`;
-- no convertir toda excepción en una respuesta genérica sin dejar evidencia en logs;
-- no exponer stack traces o secretos al Front;
-- diferenciar errores esperados de fallos inesperados;
-- mantener mensajes de usuario sencillos;
-- registrar detalles técnicos únicamente en backend.
-
-No crear jerarquías complejas de excepciones personalizadas salvo necesidad real.
-
-Si existe un patrón de manejo de errores ya establecido en DesignerIA, reutilizarlo.
+- no `catch { }`;
+- no esconder excepciones;
+- no exponer stack traces al Front;
+- distinguir error esperado de fallo inesperado;
+- mensaje simple al usuario;
+- detalle técnico en backend;
+- reutilizar patrón existente.
 
 ---
 
-## 10. Dependencias
+## 15. Dependencias/configuración
 
-Agregar una dependencia nueva es una decisión explícita.
+Dependencia nueva = decisión explícita.
 
-El agente NO debe instalar paquetes por iniciativa propia.
+No instalar paquetes por iniciativa propia.
 
-Antes de agregar una dependencia no autorizada debe preguntar.
+No modificar configuración global de NuGet, .NET, Git, Visual Studio, VS Code, PowerShell, certificados o variables de ambiente.
 
-No modificar:
-
-- `NuGet.Config` global;
-- `NuGet.Config` local;
-- fuentes globales de NuGet;
-- herramientas globales .NET;
-- configuración global de Visual Studio.
-
-Para dependencias públicas autorizadas, usar `nuget.org` directamente cuando sea necesario.
-
-No inspeccionar el caché global de paquetes para descubrir APIs.
-
-Usar:
-
-1. documentación oficial;
-2. código existente del proyecto;
-3. compilador;
-4. IntelliSense/API pública accesible normalmente.
+Usar documentación oficial, código actual, compilador e IntelliSense.
 
 ---
 
-## 11. Seguridad
+## 16. Seguridad
 
-Nunca guardar o exponer:
+Nunca guardar/exponer:
 
 - passwords;
 - tokens;
@@ -660,181 +523,269 @@ Nunca guardar o exponer:
 - API keys;
 - cookies;
 - secrets;
-- headers de autorización.
+- headers de autorización;
+- claves privadas.
 
-No colocar secretos en `wwwroot`.
+No secretos en `wwwroot`.
 
 No hardcodear credenciales.
 
-No imprimir secretos en logs.
-
-No ampliar permisos para "hacer que funcione".
-
-Aplicar el principio:
+Principio:
 
 ```text
-mínimo acceso necesario para la tarea actual
+mínimo acceso necesario
 ```
+
+Con Windows Authentication usar la identidad actual sin intentar extraer credenciales.
 
 ---
 
-## 12. Git, Azure e infraestructura
+## 17. Git — frontera estricta
 
-El agente NO debe realizar operaciones Git sin autorización explícita.
+### Lectura permitida automáticamente
 
-Esto incluye:
+```text
+git status
+git status --short
+git diff
+git diff --check
+git log
+git show
+git branch --show-current
+git remote -v
+```
 
-- init;
-- add;
-- commit;
-- push;
-- pull;
-- fetch;
-- branch;
-- merge;
-- rebase;
-- clone;
-- Pull Requests;
-- creación de repositorios.
+### Escritura requiere autorización explícita actual
 
-El agente NO debe consultar, crear o modificar Azure sin autorización explícita.
+No ejecutar por iniciativa propia:
 
-Esto incluye:
+- `git init`;
+- `git add`;
+- `git commit`;
+- `git push`;
+- `git pull`;
+- `git fetch`;
+- `git switch/checkout`;
+- `git restore`;
+- `git clean`;
+- `git rm`;
+- crear/cambiar/borrar ramas;
+- merge/rebase/reset/cherry-pick/revert/stash;
+- tags;
+- configuración Git;
+- PRs;
+- repos remotos.
 
-- subscriptions;
-- resource groups;
+Implementar código no autoriza Git.
+
+Antes de implementar, revisar `git status --short`.
+
+Preservar cambios preexistentes: no revertir, descartar, sobrescribir ni stash.
+
+Mantener diff mínimo y preservar formato/EOL.
+
+### Modelo de ramas autorizado cuando corresponda
+
+```text
+main       -> estable / producción
+develop    -> integración siguiente versión
+feature/*  -> trabajo puntual
+release/*  -> candidato a staging/release
+hotfix/*   -> corrección urgente desde main
+```
+
+Ejemplos:
+
+```text
+feature/chat-markdown
+feature/copilot-model-config
+feature/create-view-executor
+release/v1.1.0
+hotfix/auth-null-user
+```
+
+No mezclar conceptos como `Feature/Release/...`.
+
+`main` no recibe desarrollo directo.
+
+Preferir `release/*` como candidato a staging en lugar de rama eterna `staging`, salvo decisión explícita distinta.
+
+---
+
+## 18. Azure/infraestructura/deploy
+
+Todo requiere autorización explícita.
+
+No tocar por iniciativa propia:
+
 - Azure Repos;
 - pipelines;
 - VMs;
 - App Services;
 - Key Vault;
-- Foundry;
-- Azure OpenAI;
+- Azure OpenAI/Foundry;
 - Service Bus;
 - Application Insights;
-- deployments.
+- environments;
+- service connections;
+- deployments;
+- Docker/Kubernetes/Redis.
 
-No Docker, Kubernetes, Redis u otra infraestructura no solicitada.
-
----
-
-## 13. Qué puede asumir el agente
-
-Cuando el usuario autoriza una tarea, el agente debe avanzar de forma autónoma dentro de su alcance.
-
-Puede asumir autorización para:
-
-- leer archivos dentro de `C:\Code\DesignerAI`;
-- crear archivos necesarios dentro del proyecto;
-- modificar archivos necesarios para la tarea;
-- crear carpetas dentro del proyecto;
-- agregar clases, DTOs, services o componentes necesarios;
-- ejecutar `dotnet restore`;
-- ejecutar `dotnet build`;
-- ejecutar `dotnet run`;
-- corregir errores causados por sus propios cambios;
-- consultar endpoints locales de DesignerIA para validar;
-- consultar documentación pública oficial de una dependencia ya autorizada cuando sea necesario;
-- elegir la solución más simple entre alternativas técnicamente equivalentes.
-
-No debe pedir confirmación para operaciones rutinarias que ya están implícitamente autorizadas por el prompt.
+Git autorizado no implica Azure autorizado.
 
 ---
 
-## 14. Cuándo debe preguntar
+## 19. SQL — efectos secundarios
 
-Debe detenerse y preguntar antes de:
+Con servidor/base/auth autorizados, SQL READ-ONLY puede ejecutarse sin preguntar por cada consulta.
 
-- eliminar archivos o carpetas preexistentes;
-- sobrescribir trabajo ajeno a la tarea;
-- mover o renombrar elementos de forma destructiva;
+Preferir metadata, muestras y agregaciones.
+
+No ejecutar automáticamente:
+
+- `INSERT`;
+- `UPDATE`;
+- `DELETE`;
+- `TRUNCATE`;
+- `MERGE`;
+- `CREATE`;
+- `ALTER`;
+- `DROP`;
+- `SELECT INTO`;
+- SP funcionales;
+- cargas;
+- backups/restores;
+- Jobs;
+- permisos/usuarios/roles/configuración.
+
+No asumir que un SP es read-only por su nombre.
+
+Ante duda: inspeccionar, no ejecutar.
+
+---
+
+## 20. Cuándo preguntar
+
+Preguntar antes de:
+
+- borrar archivos preexistentes;
+- sobrescribir trabajo ajeno;
+- mover/renombrar destructivamente;
 - salir de `C:\Code\DesignerAI`;
-- inspeccionar rutas personales/globales del sistema;
-- agregar una dependencia no autorizada;
-- cambiar significativamente la arquitectura;
-- introducir un nuevo patrón para una responsabilidad ya resuelta;
-- ampliar acceso SQL;
-- ejecutar escritura SQL;
-- acceder a otra base o servidor;
-- tocar Git;
-- tocar Azure;
-- modificar infraestructura;
-- cambiar autenticación;
-- pedir o manipular credenciales;
-- hacer deploy;
-- realizar una acción con riesgo real de pérdida de información;
-- ampliar el alcance funcional del prompt.
+- agregar dependencia;
+- cambiar arquitectura significativamente;
+- introducir patrón nuevo;
+- ampliar SQL;
+- SQL de escritura;
+- otro servidor/base;
+- Git de escritura;
+- Azure;
+- infraestructura;
+- autenticación;
+- credenciales;
+- deploy;
+- riesgo real de pérdida;
+- ampliar alcance;
+- decisión funcional/arquitectónica sin evidencia suficiente.
 
-Si sólo existe una duda de implementación y puede resolverse leyendo el código actual, compilando o consultando documentación oficial, debe resolverla sin preguntar.
+Si una duda puede resolverse leyendo código/evidencia/configuración, compilando o con READ-ONLY autorizado, resolverla sin interrumpir.
 
----
-
-## 15. Operaciones prohibidas por defecto
-
-Sin autorización explícita, no:
-
-- eliminar archivos preexistentes;
-- usar `Remove-Item` de forma amplia;
-- inspeccionar otros proyectos;
-- buscar ejemplos en repositorios de terceros;
-- decompilar ensamblados;
-- usar ILSpy;
-- inspeccionar almacenes de credenciales;
-- inspeccionar cachés globales de NuGet;
-- ejecutar PowerShell para acceder directamente a SQL;
-- usar `sqlcmd`;
-- usar `Invoke-Sqlcmd`;
-- automatizar SSMS;
-- ejecutar Git;
-- ejecutar Azure CLI;
-- habilitar herramientas generales para Copilot;
-- escribir en SQL;
-- instalar herramientas globales;
-- modificar configuraciones globales de Windows, .NET, NuGet, Git, Visual Studio, Copilot CLI o PowerShell.
+> **Libertad para trabajar, no libertad para publicar ni destruir.**
 
 ---
 
-## 16. Validación de una tarea
+## 21. Validación proporcional
 
-Antes de declarar una tarea terminada:
+Antes de declarar una implementación terminada:
 
-1. compilar la solución o los proyectos afectados;
-2. corregir errores introducidos por la tarea;
-3. validar el flujo modificado de la forma más pequeña posible;
-4. verificar que funcionalidad relacionada existente no se haya roto cuando sea razonable;
-5. no repetir llamadas costosas únicamente para "estar más seguro" si la primera validación fue concluyente;
-6. resumir brevemente:
-   - qué cambió;
-   - qué se validó;
-   - resultado;
-   - cómo probarlo manualmente si aplica;
-7. detenerse.
+1. compilar proyectos afectados;
+2. corregir errores introducidos;
+3. validar el flujo de la forma más pequeña posible;
+4. verificar funcionalidad relacionada cuando sea razonable;
+5. no repetir llamadas costosas sin necesidad;
+6. reportar qué cambió;
+7. reportar qué se validó;
+8. reportar qué NO se validó;
+9. indicar prueba manual si aplica;
+10. detenerse.
 
-No continuar automáticamente con una nueva feature.
+No confundir:
+
+```text
+compiló != funciona en runtime
+inspeccionado != probado
+SQL generado != SQL ejecutado
+SQL ejecutado != Motor/Designer lo interpreta
+```
+
+No afirmar más de lo validado.
 
 ---
 
-## 17. Regla de alcance
+## 22. Reporte
+
+### Análisis
+
+Reportar:
+
+- flujo confirmado;
+- evidencia;
+- archivos/símbolos;
+- tablas/SP si aplica;
+- hipótesis;
+- falta de evidencia;
+- contradicciones;
+- impacto;
+- propuesta mínima;
+- qué NO tocar.
+
+### Implementación
+
+Reportar:
+
+- archivos modificados;
+- motivo;
+- validaciones realizadas;
+- validaciones no realizadas;
+- resultado;
+- riesgos;
+- pendientes;
+- cambios preexistentes preservados.
+
+No continuar automáticamente con otra feature.
+
+---
+
+## 23. Regla de alcance
 
 El prompt define la tarea.
 
 Este archivo define la forma de trabajar.
 
-Si el prompt pide una funcionalidad pequeña, implementar una funcionalidad pequeña.
-
-No preparar automáticamente fases futuras.
-
-No agregar código especulativo.
-
-No refactorizar áreas no relacionadas "aprovechando que estamos aquí".
-
-No cambiar tecnologías o patrones sin necesidad.
+No preparar fases futuras, agregar código especulativo, refactorizar áreas no relacionadas ni cambiar tecnologías/patrones sin necesidad.
 
 ---
 
-## 18. Regla principal
+## 24. Checklist mental
 
-Ante dos soluciones correctas, elegir la que sea:
+Antes de actuar:
+
+1. ¿Forma parte de la tarea?
+2. ¿Tengo evidencia?
+3. ¿Existe un patrón similar?
+4. ¿Puedo hacerlo con menos cambios?
+5. ¿Preservo cambios existentes?
+6. ¿Toco Git/Azure/SQL/dependencias/auth/configuración sensible?
+7. ¿Agrego complejidad no pedida?
+8. ¿Estoy suponiendo algo comprobable?
+9. ¿La acción tiene efectos secundarios?
+10. ¿Tengo autorización para esa frontera?
+
+---
+
+## 25. Regla principal
+
+Ante dos soluciones correctas, elegir la:
 
 ```text
 más simple
@@ -842,7 +793,15 @@ más simple
 + consistente con DesignerIA
 + fácil de diagnosticar
 + segura
-+ suficiente para el requerimiento actual
++ suficiente
 ```
 
-DesignerIA debe crecer paso a paso manteniendo una base de código que otro desarrollador pueda leer y entender sin necesitar explicaciones especiales.
+Si 10 líneas resuelven correctamente el problema, no crear 100.
+
+Implementar lo necesario.
+
+Validar lo suficiente.
+
+Reportar claramente.
+
+Detenerse.
