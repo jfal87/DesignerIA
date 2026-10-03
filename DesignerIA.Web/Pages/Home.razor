@@ -78,7 +78,14 @@
                             }
                             else
                             {
-                                <div class="chat-bubble">@mensaje.Texto</div>
+                                @if (!mensaje.EsUsuario && !mensaje.EsError && !mensaje.EsCreacionVista)
+                                {
+                                    <div class="chat-bubble chat-bubble-markdown">@MarkdownChatRenderer.Render(mensaje.Texto)</div>
+                                }
+                                else
+                                {
+                                    <div class="chat-bubble">@mensaje.Texto</div>
+                                }
                             }
                             @if (mensaje.ToolInvoked)
                             {
