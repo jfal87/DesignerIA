@@ -65,7 +65,13 @@ public class CopilotController : ControllerBase
             return BadRequest(new ChatResult("error", null, false, $"El mensaje no puede superar {MaxMessageLength} caracteres."));
         }
 
-        var result = await _copilotChatService.RunAsync(message, cancellationToken);
+        var conversationId = request?.ConversationId?.Trim();
+        if (!Guid.TryParse(conversationId, out _))
+        {
+            return BadRequest(new ChatResult("error", null, false, "El identificador de conversación no es válido."));
+        }
+
+        var result = await _copilotChatService.RunAsync(message, conversationId, cancellationToken);
 
         if (result.Status != "ok")
         {

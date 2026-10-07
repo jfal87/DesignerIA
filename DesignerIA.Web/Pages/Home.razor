@@ -80,7 +80,7 @@
                             {
                                 @if (!mensaje.EsUsuario && !mensaje.EsError && !mensaje.EsCreacionVista)
                                 {
-                                    <div class="chat-bubble chat-bubble-markdown">@MarkdownChatRenderer.Render(mensaje.Texto)</div>
+                                    <div class="chat-bubble chat-bubble-markdown">@mensaje.Html</div>
                                 }
                                 else
                                 {
@@ -395,9 +395,14 @@
         IReadOnlyList<KnowledgeSourceReference>? Fuentes = null,
         bool EsCreacionVista = false,
         bool VistaValida = false,
-        string? NombreVista = null);
+        string? NombreVista = null)
+    {
+        public MarkupString Html { get; } = !EsUsuario && !EsError && !EsCreacionVista
+            ? MarkdownChatRenderer.Render(Texto) : default;
+    }
 
     private readonly List<ChatMessage> _mensajes = new();
+    private string _conversationId = Guid.NewGuid().ToString();
     private string _mensajeActual = string.Empty;
     private bool _enviando;
     private ChatResult? _ultimoResultadoChat;
@@ -573,6 +578,7 @@
     private void NuevaConversacion()
     {
         _mensajes.Clear();
+        _conversationId = Guid.NewGuid().ToString();
         _mensajeActual = string.Empty;
         _ultimoResultadoChat = null;
         _vistaEnProgreso = null;
@@ -598,7 +604,7 @@
 
         try
         {
-            var respuesta = await Http.PostAsJsonAsync("api/copilot/chat", new ChatRequest(texto));
+            var respuesta = await Http.PostAsJsonAsync("api/copilot/chat", new ChatRequest(texto, _conversationId));
             var resultado = await respuesta.Content.ReadFromJsonAsync<ChatResult>();
             _ultimoResultadoChat = resultado;
 

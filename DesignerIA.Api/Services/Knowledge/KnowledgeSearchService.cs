@@ -17,9 +17,16 @@ namespace DesignerIA.Api.Services.Knowledge;
 public class KnowledgeSearchService
 {
     private const int TopResultCount = 5;
-    private const int SnippetRadius = 160;
+    private const int SnippetRadius = 600;
     private const string CuratedSentinelSourceType = "CURATED";
     private const string CuratedDisplaySourceFile = "Conocimiento del equipo";
+    private static readonly HashSet<string> StopWords = new(StringComparer.Ordinal)
+    {
+        "a", "al", "ahora", "como", "con", "cual", "de", "del", "desde", "donde", "el", "en",
+        "es", "esta", "estas", "este", "estos", "la", "las", "lo", "los", "me", "mi", "mis",
+        "no", "para", "por", "puedo", "que", "quiero", "saber", "se", "segun", "su", "sus",
+        "un", "una", "unas", "unos", "y", "documentacion"
+    };
 
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
@@ -83,18 +90,18 @@ public class KnowledgeSearchService
             {
                 if (normalizedTitle.Contains(token, StringComparison.Ordinal))
                 {
-                    score += 3;
+                    score += 8;
                 }
 
                 if (normalizedFile.Contains(token, StringComparison.Ordinal))
                 {
-                    score += 2;
+                    score += 1;
                 }
 
                 var occurrences = CountOccurrences(normalizedContent, token);
                 if (occurrences > 0)
                 {
-                    score += Math.Min(occurrences, 5);
+                    score += Math.Min(occurrences, 3);
                 }
             }
 
@@ -268,7 +275,8 @@ public class KnowledgeSearchService
     {
         return normalizedQuery
             .Split(' ', StringSplitOptions.RemoveEmptyEntries)
-            .Where(t => t.Length >= 2)
+            .Where(t => t.Length >= 2 && !StopWords.Contains(t))
+            .Select(t => t == "js" ? "javascript" : t)
             .Distinct()
             .ToList();
     }

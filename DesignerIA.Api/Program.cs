@@ -27,11 +27,14 @@ builder.Services
 builder.Services.AddOpenApi();
 
 builder.Services.AddScoped<GestionEngineHealthService>();
+builder.Services.AddScoped<HandlerExamplesService>();
+builder.Services.AddScoped<GestionEngineMetadataService>();
 builder.Services.AddScoped<StringConnectionCatalogService>();
 builder.Services.AddScoped<ViewCreationPreflightService>();
 builder.Services.AddScoped<CopilotSmokeTestService>();
 builder.Services.AddScoped<CopilotMetadataTestService>();
 builder.Services.AddScoped<CopilotChatService>();
+builder.Services.AddSingleton<ConversationContextStore>();
 builder.Services.AddScoped<KnowledgeIndexService>();
 builder.Services.AddScoped<KnowledgeSearchService>();
 // Singleton: mantiene un único lock de archivo que serializa correctamente las

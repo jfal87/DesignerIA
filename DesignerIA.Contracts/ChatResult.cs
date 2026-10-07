@@ -7,7 +7,7 @@ namespace DesignerIA.Contracts;
 /// <paramref name="ViewSpecResult"/> sólo está presente cuando el mensaje del usuario
 /// fue interpretado como una petición de creación/diseño de vista (ver
 /// <c>CopilotChatService</c>); en cualquier otro caso permanece null y el chat se
-/// comporta como una consulta documental normal.
+/// selecciona conocimiento general, documentación o metadata según la capacidad requerida.
 /// </summary>
 public record ChatResult(
     string Status,
