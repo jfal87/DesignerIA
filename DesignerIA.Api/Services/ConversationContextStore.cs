@@ -9,6 +9,9 @@ namespace DesignerIA.Api.Services;
 /// Los artefactos se registran desde evidencia Knowledge/live, separados del historial,
 /// con tipo, contenido exacto, procedencia y tema/entidad. Máximo 8 y 16.000 caracteres.
 /// ActiveHandler identifica el objeto consultado, no prueba su existencia ni funcionamiento.
+/// El sujeto, los candidatos mostrados y los artefactos grounded tienen ciclos de
+/// vida independientes: el contexto ayuda a resolver referencias, pero nunca es
+/// technical evidence.
 /// </summary>
 public sealed class ConversationContextStore
 {
@@ -81,10 +84,16 @@ public sealed class ConversationContextStore
 
         public ActiveSubject? ResolveSubject(string? reference) => reference switch
         {
-            "first" => _context.RecentSubjects.FirstOrDefault(),
+            "first" => ResolveCandidate(reference) ?? _context.RecentSubjects.FirstOrDefault(),
             "previous" => _context.RecentSubjects.LastOrDefault(s => s != _context.Subject) ?? _context.Subject,
             "handler" => _context.RecentSubjects.LastOrDefault(s => s.Kind == "Handler"),
             _ => _context.Subject
+        };
+
+        public ActiveSubject? ResolveCandidate(string? reference) => reference switch
+        {
+            "first" => _context.LastCandidateSet.FirstOrDefault(),
+            _ => null
         };
 
         public void SetActiveSubject(string kind, string name)
@@ -92,10 +101,7 @@ public sealed class ConversationContextStore
             var subject = new ActiveSubject(kind, Limit(name));
             if (_context.Subject != subject)
             {
-                _context.GroundedArtifacts = [];
-                _context.ActiveKnowledgeTopic = null;
-                _context.ActiveKnowledgeQueries = [];
-                _context.ActiveMetadataResource = null;
+                _context.SelectedEntity = null;
             }
             _context.Subject = subject;
             if (!_context.RecentSubjects.Contains(subject))
@@ -113,6 +119,36 @@ public sealed class ConversationContextStore
 
         public IReadOnlyList<GroundedArtifact> GetGroundedArtifacts() => _context.GroundedArtifacts;
 
+        public IReadOnlyList<RecentArtifactContext> GetRecentArtifactContexts() => _context.GroundedArtifacts
+            .Select(artifact => new RecentArtifactContext(artifact.Kind.ToString(), artifact.Entity, artifact.OriginatingSubject))
+            .Distinct()
+            .ToArray();
+
+        public IReadOnlyList<ActiveSubject> GetLastCandidateSet() => _context.LastCandidateSet;
+
+        public ActiveSubject? GetSelectedEntity() => _context.SelectedEntity;
+
+        public void SetLastCandidateSet(IEnumerable<ActiveSubject> candidates)
+        {
+            _context.LastCandidateSet = candidates
+                .Where(candidate => !string.IsNullOrWhiteSpace(candidate.Name))
+                .Select(candidate => new ActiveSubject(candidate.Kind, Limit(candidate.Name)))
+                .Distinct()
+                .Take(5)
+                .ToArray();
+        }
+
+        public void SelectCandidate(ActiveSubject candidate)
+        {
+            if (!_context.LastCandidateSet.Contains(candidate))
+            {
+                return;
+            }
+
+            SetActiveSubject(candidate.Kind, candidate.Name);
+            _context.SelectedEntity = candidate;
+        }
+
         public void SetGroundedArtifacts(IEnumerable<GroundedArtifact> artifacts)
         {
             var retained = new List<GroundedArtifact>();
@@ -129,7 +165,7 @@ public sealed class ConversationContextStore
                     continue;
                 }
 
-                retained.Add(artifact);
+                retained.Add(artifact with { OriginatingSubject = artifact.OriginatingSubject ?? _context.Subject });
                 characters += artifact.Content.Length;
             }
 
@@ -138,14 +174,12 @@ public sealed class ConversationContextStore
 
         public void SetActiveKnowledge(string topic, IReadOnlyList<string> queries)
         {
-            if (_context.Subject?.Kind is not ("Function" or "Property" or "View"))
+            if (_context.Subject is null)
             {
                 SetActiveSubject("Topic", topic);
             }
-            _context.ActiveMetadataResource = null;
             _context.ActiveKnowledgeTopic = Limit(topic);
             _context.ActiveKnowledgeQueries = queries.Take(3).Select(Limit).ToArray();
-            _context.GroundedArtifacts = [];
         }
 
         public void ClearActiveTopic()
@@ -155,24 +189,19 @@ public sealed class ConversationContextStore
             _context.ActiveKnowledgeTopic = null;
             _context.ActiveKnowledgeQueries = [];
             _context.GroundedArtifacts = [];
+            _context.LastCandidateSet = [];
+            _context.SelectedEntity = null;
         }
 
         public void SetActiveHandler(string handler)
         {
             SetActiveSubject("Handler", handler);
-            _context.ActiveKnowledgeTopic = null;
-            _context.ActiveKnowledgeQueries = [];
-            _context.ActiveMetadataResource = null;
             _context.LastAccessUtc = DateTimeOffset.UtcNow;
         }
 
         public void SetActiveMetadataResource(string resource)
         {
             _context.ActiveMetadataResource = resource;
-            _context.Subject = null;
-            _context.ActiveKnowledgeTopic = null;
-            _context.ActiveKnowledgeQueries = [];
-            _context.GroundedArtifacts = [];
             _context.LastAccessUtc = DateTimeOffset.UtcNow;
         }
 
@@ -211,6 +240,8 @@ public sealed class ConversationContextStore
         public string? ActiveKnowledgeTopic { get; set; }
         public IReadOnlyList<string> ActiveKnowledgeQueries { get; set; } = [];
         public IReadOnlyList<GroundedArtifact> GroundedArtifacts { get; set; } = [];
+        public IReadOnlyList<ActiveSubject> LastCandidateSet { get; set; } = [];
+        public ActiveSubject? SelectedEntity { get; set; }
     }
 
     public enum GroundedArtifactKind { Json, Variable, Snippet, TechnicalName }
@@ -224,7 +255,11 @@ public sealed class ConversationContextStore
         string Origin,
         string Source,
         string Topic,
-        string Entity);
+        string Entity,
+        ActiveSubject? OriginatingSubject = null);
+
+    // Conversational metadata only. It intentionally excludes artifact content and evidence source.
+    public sealed record RecentArtifactContext(string Kind, string Entity, ActiveSubject? OriginatingSubject);
 
     internal sealed record ConversationTurn(string UserMessage, string AssistantResponse);
 }

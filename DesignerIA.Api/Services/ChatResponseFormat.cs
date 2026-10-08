@@ -7,6 +7,8 @@ namespace DesignerIA.Api.Services;
 
 internal static class ChatResponseFormat
 {
+    public const string MissingGroundedArtifactMessage = "No tengo un artefacto grounded de ese tipo en la conversación.";
+
     public static string Resolve(string normalizedMessage, string plannerMode = "explanation")
     {
         var exclusive = Regex.IsMatch(normalizedMessage, @"\b(solo|solamente|unicamente|nada mas)\b");
@@ -30,6 +32,17 @@ internal static class ChatResponseFormat
             _ => "explanation"
         };
     }
+
+    public static bool RequiresGroundedArtifact(string mode) => mode is "json" or "variable" or "code" or "names";
+
+    public static bool HasCompatibleArtifact(string mode, IReadOnlyList<GroundedArtifact> artifacts) => artifacts.Any(artifact => mode switch
+    {
+        "json" => artifact.Kind == GroundedArtifactKind.Json,
+        "variable" => artifact.Kind == GroundedArtifactKind.Variable,
+        "code" => artifact.Kind is GroundedArtifactKind.Snippet or GroundedArtifactKind.Variable,
+        "names" => artifact.Kind is GroundedArtifactKind.TechnicalName or GroundedArtifactKind.Variable,
+        _ => false
+    });
 
     public static ChatResult Apply(ChatResult result, string mode, IReadOnlyList<GroundedArtifact> artifacts)
     {
