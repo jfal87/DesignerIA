@@ -605,6 +605,12 @@
         try
         {
             var respuesta = await Http.PostAsJsonAsync("api/copilot/chat", new ChatRequest(texto, _conversationId));
+            if (_estado is null)
+            {
+                // La Api volvió a responder tras un fallo de contacto: se refresca el indicador.
+                await ConsultarEstadoAsync();
+            }
+
             var resultado = await respuesta.Content.ReadFromJsonAsync<ChatResult>();
             _ultimoResultadoChat = resultado;
 
@@ -631,8 +637,14 @@
                 _mensajes.Add(new ChatMessage(resultado?.Error ?? "DesignerIA no pudo responder.", EsUsuario: false, ToolInvoked: false, EsError: true));
             }
         }
-        catch
+        catch (Exception ex)
         {
+            if (ex is HttpRequestException or TaskCanceledException)
+            {
+                // Sin respuesta HTTP (red o timeout): el indicador no puede seguir en "Disponible".
+                _estado = null;
+            }
+
             _ultimoResultadoChat = new ChatResult("error", null, false, "No se pudo contactar a la Api.");
             _mensajes.Add(new ChatMessage("No se pudo contactar a la Api.", EsUsuario: false, ToolInvoked: false, EsError: true));
         }

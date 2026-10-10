@@ -12,6 +12,8 @@ namespace DesignerIA.Api.Services;
 /// El sujeto, los candidatos mostrados y los artefactos grounded tienen ciclos de
 /// vida independientes: el contexto ayuda a resolver referencias, pero nunca es
 /// technical evidence.
+/// CurrentFocus y PreviousFocus representan transiciones de sujeto; la operación
+/// y las queries pertenecen a cada foco, no al historial de primeras apariciones.
 /// </summary>
 public sealed class ConversationContextStore
 {
@@ -55,8 +57,43 @@ public sealed class ConversationContextStore
     public sealed class ConversationLease : IAsyncDisposable
     {
         private readonly ConversationContext _context;
+        private readonly ConversationContext? _commitTarget;
 
         internal ConversationLease(ConversationContext context) => _context = context;
+
+        private ConversationLease(ConversationContext context, ConversationContext commitTarget)
+        {
+            _context = context;
+            _commitTarget = commitTarget;
+        }
+
+        internal ConversationLease BeginUpdate()
+        {
+            if (_commitTarget is not null) { throw new InvalidOperationException("A context update is already staged."); }
+            var staged = new ConversationContext();
+            staged.CopyFrom(_context);
+            return new ConversationLease(staged, _context);
+        }
+
+        internal void Commit()
+        {
+            if (_commitTarget is null) { throw new InvalidOperationException("Only a staged context can be committed."); }
+            _commitTarget.CopyFrom(_context);
+        }
+
+        internal void CommitCandidateSet()
+        {
+            if (_commitTarget is null) { throw new InvalidOperationException("Only a staged context can publish candidates."); }
+            _commitTarget.LastCandidateSet = _context.LastCandidateSet.ToArray();
+        }
+
+        // Records the exchange alone: focus, artifacts and candidates of the stored conversation stay untouched.
+        internal void CommitTurnOnly(string message, string response)
+        {
+            if (_commitTarget is null) { throw new InvalidOperationException("Only a staged context can record a turn."); }
+            _commitTarget.Turns.Enqueue(new ConversationTurn(Limit(message), Limit(response)));
+            while (_commitTarget.Turns.Count > MaximumTurns) { _commitTarget.Turns.TryDequeue(out _); }
+        }
 
         public string BuildPrompt(string message)
         {
@@ -80,12 +117,30 @@ public sealed class ConversationContextStore
 
         public ActiveSubject? GetActiveSubject() => _context.Subject;
 
+        public ConversationFocus? GetCurrentFocus() => _context.CurrentFocus;
+
+        public ConversationFocus? GetPreviousFocus() => _context.PreviousFocus;
+
+        internal ConversationSubjectSnapshot GetSubjectSnapshot() => new(
+            _context.CurrentFocus, _context.PreviousFocus,
+            Array.AsReadOnly(_context.RecentSubjects.ToArray()),
+            Array.AsReadOnly(_context.LastCandidateSet.ToArray()));
+
+        internal void SetResolvedSubject(ResolvedConversationSubject identity)
+        {
+            SetActiveSubject(identity.Subject.Kind, identity.Subject.Name);
+            if (_context.CurrentFocus is { } focus)
+            {
+                _context.CurrentFocus = focus with { Identity = identity };
+            }
+        }
+
         public IReadOnlyList<ActiveSubject> GetRecentSubjects() => _context.RecentSubjects;
 
         public ActiveSubject? ResolveSubject(string? reference) => reference switch
         {
-            "first" => ResolveCandidate(reference) ?? _context.RecentSubjects.FirstOrDefault(),
-            "previous" => _context.RecentSubjects.LastOrDefault(s => s != _context.Subject) ?? _context.Subject,
+            "first" => ResolveCandidate(reference),
+            "previous" => _context.PreviousFocus?.Subject,
             "handler" => _context.RecentSubjects.LastOrDefault(s => s.Kind == "Handler"),
             _ => _context.Subject
         };
@@ -99,15 +154,33 @@ public sealed class ConversationContextStore
         public void SetActiveSubject(string kind, string name)
         {
             var subject = new ActiveSubject(kind, Limit(name));
-            if (_context.Subject != subject)
+            if (!SameSubject(_context.Subject, subject))
             {
+                if (_context.CurrentFocus is { } currentFocus)
+                {
+                    _context.PreviousFocus = currentFocus;
+                }
+                _context.CurrentFocus = new ConversationFocus(subject, null, null, []);
                 _context.SelectedEntity = null;
             }
-            _context.Subject = subject;
-            if (!_context.RecentSubjects.Contains(subject))
+            else if (_context.CurrentFocus is { } focus)
+            {
+                _context.CurrentFocus = focus with { Subject = subject };
+            }
+            var recentIndex = _context.RecentSubjects.FindIndex(recent => SameSubject(recent, subject));
+            if (recentIndex >= 0) { _context.RecentSubjects[recentIndex] = subject; }
+            else
             {
                 _context.RecentSubjects.Add(subject);
                 if (_context.RecentSubjects.Count > 3) { _context.RecentSubjects.RemoveAt(0); }
+            }
+        }
+
+        public void SetRequestKind(string? requestKind)
+        {
+            if (_context.CurrentFocus is { } currentFocus)
+            {
+                _context.CurrentFocus = currentFocus with { RequestKind = requestKind };
             }
         }
 
@@ -138,6 +211,8 @@ public sealed class ConversationContextStore
                 .ToArray();
         }
 
+        internal void ClearCandidateSet() => _context.LastCandidateSet = [];
+
         public void SelectCandidate(ActiveSubject candidate)
         {
             if (!_context.LastCandidateSet.Contains(candidate))
@@ -153,7 +228,7 @@ public sealed class ConversationContextStore
         {
             var retained = new List<GroundedArtifact>();
             var characters = 0;
-            foreach (var artifact in artifacts.DistinctBy(a => a.Content))
+            foreach (var artifact in artifacts.DistinctBy(a => (a.Content, a.OriginatingSubject, a.Origin, a.Source)))
             {
                 if (retained.Count == 8)
                 {
@@ -165,7 +240,7 @@ public sealed class ConversationContextStore
                     continue;
                 }
 
-                retained.Add(artifact with { OriginatingSubject = artifact.OriginatingSubject ?? _context.Subject });
+                retained.Add(artifact);
                 characters += artifact.Content.Length;
             }
 
@@ -178,16 +253,24 @@ public sealed class ConversationContextStore
             {
                 SetActiveSubject("Topic", topic);
             }
-            _context.ActiveKnowledgeTopic = Limit(topic);
-            _context.ActiveKnowledgeQueries = queries.Take(3).Select(Limit).ToArray();
+            if (_context.CurrentFocus is { } currentFocus)
+            {
+                _context.CurrentFocus = currentFocus with
+                {
+                    KnowledgeTopic = Limit(topic),
+                    KnowledgeQueries = queries.Take(3).Select(Limit).ToArray()
+                };
+            }
         }
 
         public void ClearActiveTopic()
         {
-            _context.Subject = null;
+            if (_context.CurrentFocus is { } currentFocus)
+            {
+                _context.PreviousFocus = currentFocus;
+            }
+            _context.CurrentFocus = null;
             _context.ActiveMetadataResource = null;
-            _context.ActiveKnowledgeTopic = null;
-            _context.ActiveKnowledgeQueries = [];
             _context.GroundedArtifacts = [];
             _context.LastCandidateSet = [];
             _context.SelectedEntity = null;
@@ -224,7 +307,8 @@ public sealed class ConversationContextStore
 
         public ValueTask DisposeAsync()
         {
-            _context.Gate.Release();
+            if (_commitTarget is null) { _context.Gate.Release(); }
+            else { _context.Gate.Dispose(); }
             return ValueTask.CompletedTask;
         }
     }
@@ -234,20 +318,50 @@ public sealed class ConversationContextStore
         public SemaphoreSlim Gate { get; } = new(1, 1);
         public Queue<ConversationTurn> Turns { get; } = new();
         public DateTimeOffset LastAccessUtc { get; set; } = DateTimeOffset.UtcNow;
-        public ActiveSubject? Subject { get; set; }
+        public ConversationFocus? CurrentFocus { get; set; }
+        public ConversationFocus? PreviousFocus { get; set; }
+        public ActiveSubject? Subject => CurrentFocus?.Subject;
         public List<ActiveSubject> RecentSubjects { get; } = [];
         public string? ActiveMetadataResource { get; set; }
-        public string? ActiveKnowledgeTopic { get; set; }
-        public IReadOnlyList<string> ActiveKnowledgeQueries { get; set; } = [];
+        public string? ActiveKnowledgeTopic => CurrentFocus?.KnowledgeTopic;
+        public IReadOnlyList<string> ActiveKnowledgeQueries => CurrentFocus?.KnowledgeQueries ?? [];
         public IReadOnlyList<GroundedArtifact> GroundedArtifacts { get; set; } = [];
         public IReadOnlyList<ActiveSubject> LastCandidateSet { get; set; } = [];
         public ActiveSubject? SelectedEntity { get; set; }
+
+        public void CopyFrom(ConversationContext source)
+        {
+            CurrentFocus = source.CurrentFocus;
+            PreviousFocus = source.PreviousFocus;
+            ActiveMetadataResource = source.ActiveMetadataResource;
+            GroundedArtifacts = source.GroundedArtifacts.ToArray();
+            LastCandidateSet = source.LastCandidateSet.ToArray();
+            SelectedEntity = source.SelectedEntity;
+            LastAccessUtc = source.LastAccessUtc;
+            RecentSubjects.Clear();
+            RecentSubjects.AddRange(source.RecentSubjects);
+            Turns.Clear();
+            foreach (var turn in source.Turns) { Turns.Enqueue(turn); }
+        }
     }
 
     public enum GroundedArtifactKind { Json, Variable, Snippet, TechnicalName }
 
     // A subject identifies the user's topic; unlike an artifact, it is never technical evidence.
     public sealed record ActiveSubject(string Kind, string Name);
+
+    internal static bool SameSubject(ActiveSubject? left, ActiveSubject? right) =>
+        left is not null && right is not null && left.Kind == right.Kind
+        && left.Name.Equals(right.Name, StringComparison.OrdinalIgnoreCase);
+
+    public sealed record ConversationFocus(
+        ActiveSubject Subject,
+        string? RequestKind,
+        string? KnowledgeTopic,
+        IReadOnlyList<string> KnowledgeQueries)
+    {
+        internal ResolvedConversationSubject? Identity { get; init; }
+    }
 
     public sealed record GroundedArtifact(
         GroundedArtifactKind Kind,

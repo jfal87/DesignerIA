@@ -33,6 +33,8 @@ builder.Services.AddScoped<StringConnectionCatalogService>();
 builder.Services.AddScoped<ViewCreationPreflightService>();
 builder.Services.AddScoped<CopilotSmokeTestService>();
 builder.Services.AddScoped<CopilotMetadataTestService>();
+// Singleton: un único runtime del SDK por proceso; cada request crea y cierra su propia sesión.
+builder.Services.AddSingleton<CopilotClientProvider>();
 builder.Services.AddScoped<CopilotChatService>();
 builder.Services.AddSingleton<ConversationContextStore>();
 builder.Services.AddScoped<KnowledgeIndexService>();

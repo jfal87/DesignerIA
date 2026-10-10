@@ -75,7 +75,8 @@ public class CopilotController : ControllerBase
 
         if (result.Status != "ok")
         {
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, result);
+            return StatusCode(result.ErrorKind == "semantic"
+                ? StatusCodes.Status502BadGateway : StatusCodes.Status503ServiceUnavailable, result);
         }
 
         return Ok(result);

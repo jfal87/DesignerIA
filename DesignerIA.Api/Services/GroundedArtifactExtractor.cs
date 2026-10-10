@@ -31,9 +31,31 @@ internal static class GroundedArtifactExtractor
     }
 
     public static (string Response, IReadOnlyList<GroundedArtifact> Artifacts) FromKnowledge(
-        string response, IReadOnlyList<KnowledgeSearchResultItem> evidence, string topic)
+        string response, IReadOnlyList<KnowledgeSearchResultItem> evidence, string topic,
+        ActiveSubject? subject = null, IReadOnlyList<ActiveSubject>? knownSubjects = null)
     {
+        evidence = evidence.Where(item => item.SourceType is "Document" or "Curated"
+            && !string.IsNullOrWhiteSpace(item.SourceFile) && !string.IsNullOrWhiteSpace(item.RelativePath)).ToArray();
         var artifacts = new List<GroundedArtifact>();
+        var identities = (knownSubjects ?? []).Concat(subject is null ? [] : new[] { subject })
+            .Where(identity => identity.Kind != "General").GroupBy(identity => identity.Kind)
+            .SelectMany(group => group.DistinctBy(identity => identity.Name, StringComparer.OrdinalIgnoreCase)).ToArray();
+        GroundedArtifact Create(GroundedArtifactKind kind, string content, KnowledgeSearchResultItem source, string entity)
+        {
+            var mentioned = identities.Where(identity => source.Title.Equals(identity.Name, StringComparison.OrdinalIgnoreCase)
+                || Regex.IsMatch(source.Snippet, $@"(?<![\p{{L}}\p{{N}}_$]){Regex.Escape(identity.Name)}(?![\p{{L}}\p{{N}}_$])",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)).ToArray();
+            var scope = kind is GroundedArtifactKind.Json or GroundedArtifactKind.Snippet
+                ? FindDocumentedOwner(source, content, identities) : (HasScope: false, Owner: (ActiveSubject?)null);
+            // A record overrides a generic title. Unscoped multi-subject mentions remain ambiguous.
+            var owner = scope.HasScope ? scope.Owner : mentioned.Length == 1
+                && (source.Title.Equals(mentioned[0].Name, StringComparison.OrdinalIgnoreCase)
+                    || kind is GroundedArtifactKind.Variable or GroundedArtifactKind.TechnicalName
+                        && entity.Equals(mentioned[0].Name, StringComparison.OrdinalIgnoreCase))
+                ? mentioned[0] : null;
+            return new(kind, content, "Knowledge", $"{source.SourceFile}: {source.Title}", topic,
+                kind is GroundedArtifactKind.Json or GroundedArtifactKind.Snippet ? owner?.Name ?? source.Title : entity, owner);
+        }
         var exactResponseSource = evidence.FirstOrDefault(item =>
             response.Trim().Length > 0 && item.Snippet.Contains(response.Trim(), StringComparison.Ordinal));
         var declarations = new List<GroundedArtifact>();
@@ -54,8 +76,7 @@ internal static class GroundedArtifactExtractor
                 }
 
                 var content = item.Snippet[declaration.Index..(end + 1)];
-                declarations.Add(new GroundedArtifact(GroundedArtifactKind.Variable, content, "Knowledge",
-                    $"{item.SourceFile}: {item.Title}", topic, name));
+                declarations.Add(Create(GroundedArtifactKind.Variable, content, item, name));
             }
         }
 
@@ -64,7 +85,8 @@ internal static class GroundedArtifactExtractor
             var variants = group.DistinctBy(a => a.Content).ToArray();
             if (variants.Length > 1)
             {
-                artifacts.AddRange(variants.Where(a => response.Contains(a.Content, StringComparison.Ordinal)));
+                artifacts.AddRange(group.Where(a => response.Contains(a.Content, StringComparison.Ordinal))
+                    .DistinctBy(a => (a.Content, a.OriginatingSubject, a.Source)));
                 continue;
             }
 
@@ -85,7 +107,7 @@ internal static class GroundedArtifactExtractor
                 response += $"\n\n## Fragmento documental\n```javascript\n{content}\n```";
             }
 
-            artifacts.Add(artifact);
+            artifacts.AddRange(group.DistinctBy(a => (a.Content, a.OriginatingSubject, a.Source)));
         }
 
         if (exactResponseSource is not null && !artifacts.Any(a => a.Content == response.Trim()))
@@ -100,8 +122,7 @@ internal static class GroundedArtifactExtractor
             {
                 // Exact source text need not be JSON to be a grounded snippet.
             }
-            artifacts.Add(new GroundedArtifact(kind, response.Trim(), "Knowledge",
-                $"{exactResponseSource.SourceFile}: {exactResponseSource.Title}", topic, topic));
+            artifacts.Add(Create(kind, response.Trim(), exactResponseSource, topic));
         }
 
         foreach (Match block in Regex.Matches(response, @"```[^\r\n]*\r?\n(?<code>[\s\S]*?)```"))
@@ -124,8 +145,51 @@ internal static class GroundedArtifactExtractor
                 // A non-JSON block can still be an exact documentary snippet.
             }
 
-            artifacts.Add(new GroundedArtifact(kind, code, "Knowledge",
-                $"{source.SourceFile}: {source.Title}", topic, topic));
+            artifacts.Add(Create(kind, code, source, topic));
+        }
+
+        // Scan evidence, not model prose; retain only objects displayed verbatim.
+        foreach (var source in evidence)
+        {
+            var offset = 0;
+            while (offset < source.Snippet.Length)
+            {
+                var json = FirstJsonObject(source.Snippet[offset..]);
+                if (json is null)
+                {
+                    break;
+                }
+
+                offset = source.Snippet.IndexOf(json, offset, StringComparison.Ordinal) + json.Length;
+                using var document = System.Text.Json.JsonDocument.Parse(json);
+                var candidate = Create(GroundedArtifactKind.Json, json, source, topic);
+                if (!response.Contains(json, StringComparison.Ordinal)
+                    || artifacts.Any(a => a.Source == candidate.Source && a.OriginatingSubject == candidate.OriginatingSubject
+                        && (a.Content == json || a.Kind == GroundedArtifactKind.Json
+                            && a.Content.Contains(json, StringComparison.Ordinal))))
+                {
+                    continue;
+                }
+
+                artifacts.Add(candidate);
+            }
+        }
+
+        // Legacy parameter syntax (an object that is not strict JSON) is kept as an exact snippet when displayed verbatim.
+        foreach (var source in evidence)
+        {
+            foreach (Match start in Regex.Matches(source.Snippet, @"\{\s*""[^""\r\n]{1,80}""\s*:"))
+            {
+                var end = FindBalancedBraceEnd(source.Snippet, start.Index);
+                if (end < 0) { continue; }
+                var syntax = source.Snippet[start.Index..(end + 1)];
+                if (FirstJsonObject(syntax) == syntax || !response.Contains(syntax, StringComparison.Ordinal)
+                    || artifacts.Any(a => a.Content.Contains(syntax, StringComparison.Ordinal)))
+                {
+                    continue;
+                }
+                artifacts.Add(Create(GroundedArtifactKind.Snippet, syntax, source, topic));
+            }
         }
 
         foreach (Match identifier in Regex.Matches(response, @"`(?<name>[$A-Za-z_][$\w]*)`"))
@@ -140,8 +204,7 @@ internal static class GroundedArtifactExtractor
             var source = evidence.FirstOrDefault(e => Regex.IsMatch(e.Snippet, $@"(?<![$\w]){Regex.Escape(name)}(?![$\w])"));
             if (source is not null)
             {
-                artifacts.Add(new GroundedArtifact(GroundedArtifactKind.TechnicalName, name, "Knowledge",
-                    $"{source.SourceFile}: {source.Title}", topic, name));
+                artifacts.Add(Create(GroundedArtifactKind.TechnicalName, name, source, name));
             }
         }
 
@@ -152,13 +215,68 @@ internal static class GroundedArtifactExtractor
                 var name = label.Groups["name"].Value;
                 if (!artifacts.Any(a => a.Entity == name) && Regex.IsMatch(response, $@"\b{Regex.Escape(name)}\b"))
                 {
-                    artifacts.Insert(0, new GroundedArtifact(GroundedArtifactKind.TechnicalName, name, "Knowledge",
-                        $"{source.SourceFile}: {source.Title}", topic, name));
+                    artifacts.Insert(0, Create(GroundedArtifactKind.TechnicalName, name, source, name));
                 }
             }
         }
 
         return (response, artifacts);
+    }
+
+
+    private static (bool HasScope, ActiveSubject? Owner) FindDocumentedOwner(
+        KnowledgeSearchResultItem source, string content, IReadOnlyList<ActiveSubject> identities)
+    {
+        // These are documentary record boundaries, not guesses from the current focus.
+        var records = new List<(string Name, int Start, int End)>();
+        foreach (Match row in Regex.Matches(source.Snippet,
+            @"(?m)^[ \t]*(?:\d+[ \t]*\|[ \t]*)?(?<name>[\p{L}_$][\p{L}\p{N}_$]*)[ \t]*\|"))
+        {
+            var end = source.Snippet.IndexOf('\n', row.Index);
+            records.Add((row.Groups["name"].Value, row.Index, end < 0 ? source.Snippet.Length : end));
+        }
+        foreach (Match row in Regex.Matches(source.Snippet,
+            @"(?m)^[ \t]*\(\d+\s*,\s*N?'(?<name>[\p{L}_$][\p{L}\p{N}_$]*)'\s*,\s*N?'(?<description>(?:''|[^'])*)'"))
+        {
+            var description = row.Groups["description"];
+            records.Add((row.Groups["name"].Value, description.Index, description.Index + description.Length));
+        }
+        var headings = Regex.Matches(source.Snippet,
+            @"(?m)^[ \t]*(?<name>[\p{L}_$][\p{L}\p{N}_$]*)[ \t]*\r?\n[ \t]*Descripci[oó]n y ejemplo\b").Cast<Match>().ToArray();
+        for (var index = 0; index < headings.Length; index++)
+        {
+            records.Add((headings[index].Groups["name"].Value, headings[index].Index,
+                index + 1 < headings.Length ? headings[index + 1].Index : source.Snippet.Length));
+        }
+
+        var scopes = new List<string?>();
+        var offset = 0;
+        while ((offset = source.Snippet.IndexOf(content, offset, StringComparison.Ordinal)) >= 0)
+        {
+            var names = records.Where(record => record.Start <= offset && offset + content.Length <= record.End)
+                .Select(record => record.Name).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            scopes.Add(names.Length == 1 ? names[0] : null);
+            offset += content.Length;
+        }
+        if (scopes.All(name => name is null)) { return (false, null); }
+        if (scopes.Any(name => name is null) || scopes.Distinct(StringComparer.OrdinalIgnoreCase).Count() != 1)
+        {
+            return (true, null);
+        }
+        var owners = identities.Where(identity => identity.Name.Equals(scopes[0], StringComparison.OrdinalIgnoreCase)).ToArray();
+        return (true, owners.Length == 1 ? owners[0] : null);
+    }
+
+    // Quotes are deliberately ignored: the legacy syntax nests unescaped quotes, so only braces delimit it.
+    private static int FindBalancedBraceEnd(string text, int start)
+    {
+        var depth = 0;
+        for (var i = start; i < text.Length && i - start <= 600 && text[i] is not ('\r' or '\n'); i++)
+        {
+            if (text[i] == '{') { depth++; }
+            else if (text[i] == '}' && --depth == 0) { return i; }
+        }
+        return -1;
     }
 
     private static int FindStatementEnd(string text, int start)

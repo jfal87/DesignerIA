@@ -7,6 +7,8 @@ namespace DesignerIA.Api.Services;
 public sealed class GestionEngineMetadataService
 {
     private const int MaximumListSize = 50;
+    // Ceiling for the paged catalogue of actions; reaching it is reported as a partial list.
+    private const int MaximumCatalogueSize = 2_000;
     private readonly string _connectionString;
     private readonly ILogger<GestionEngineMetadataService> _logger;
 
@@ -29,6 +31,7 @@ public sealed class GestionEngineMetadataService
         }
 
         var stopwatch = Stopwatch.StartNew();
+        int? listTotal = null;
         await using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
@@ -42,6 +45,56 @@ public sealed class GestionEngineMetadataService
             stopwatch.Stop();
             _logger.LogInformation("GestionEngine metadata count completed in {ElapsedMs} ms. Resource: {Resource}, Count: {Count}", stopwatch.ElapsedMilliseconds, resource, count);
             return new GestionEngineMetadataResult(resource, operation, search, count, []);
+        }
+
+        if (operation == "List")
+        {
+            await using var totalCommand = connection.CreateCommand();
+            totalCommand.CommandText = resource == "HandlerActions"
+                ? "SELECT COUNT(*) FROM dbo.AccionesHandler;"
+                : "SELECT COUNT(*) FROM dbo.Handlers;";
+            var total = Convert.ToInt32(await totalCommand.ExecuteScalarAsync(cancellationToken));
+            if (resource == "HandlerActions")
+            {
+                // Keyset pages (no OFFSET/FETCH: the catalogue may live on SQL Server 2008 R2).
+                var catalogue = new List<GestionEngineMetadataItem>();
+                var exhausted = false;
+                while (catalogue.Count < MaximumCatalogueSize)
+                {
+                    await using var pageCommand = connection.CreateCommand();
+                    pageCommand.CommandText = """
+                        SELECT TOP (@limit) IdAccionHandler, Accion, Descripcion, ParametrosJson, IdTipoHandler
+                        FROM dbo.AccionesHandler
+                        WHERE @afterId IS NULL OR Accion > @afterName OR (Accion = @afterName AND IdAccionHandler > @afterId)
+                        ORDER BY Accion, IdAccionHandler;
+                        """;
+                    pageCommand.Parameters.Add("@limit", System.Data.SqlDbType.Int).Value = MaximumListSize;
+                    pageCommand.Parameters.Add("@afterName", System.Data.SqlDbType.NVarChar, 4000).Value = catalogue.Count == 0 ? DBNull.Value : catalogue[^1].Name;
+                    pageCommand.Parameters.Add("@afterId", System.Data.SqlDbType.Int).Value = catalogue.Count == 0 ? DBNull.Value : catalogue[^1].Id;
+                    var before = catalogue.Count;
+                    await using (var pageReader = await pageCommand.ExecuteReaderAsync(cancellationToken))
+                    {
+                        while (await pageReader.ReadAsync(cancellationToken))
+                        {
+                            catalogue.Add(new GestionEngineMetadataItem(pageReader.GetInt32(0), pageReader.GetString(1),
+                                GetNullableString(pageReader, 2), GetNullableString(pageReader, 3), pageReader.IsDBNull(4) ? null : pageReader.GetInt32(4)));
+                        }
+                    }
+                    if (catalogue.Count - before < MaximumListSize)
+                    {
+                        exhausted = true;
+                        break;
+                    }
+                }
+                // The list is complete only when a page came back short. If the ceiling stopped it, the count taken
+                // before reading says how many there were; it is never used to call a stopped read complete.
+                var known = exhausted ? catalogue.Count : Math.Max(total, catalogue.Count + 1);
+                stopwatch.Stop();
+                _logger.LogInformation("GestionEngine metadata catalogue completed in {ElapsedMs} ms. Resource: {Resource}, Items: {Items}, Total: {Total}",
+                    stopwatch.ElapsedMilliseconds, resource, catalogue.Count, known);
+                return new GestionEngineMetadataResult(resource, operation, search, known, catalogue);
+            }
+            listTotal = total;
         }
 
         await using var listCommand = connection.CreateCommand();
@@ -77,7 +130,7 @@ public sealed class GestionEngineMetadataService
         }
         stopwatch.Stop();
         _logger.LogInformation("GestionEngine metadata {Operation} completed in {ElapsedMs} ms. Resource: {Resource}, Items: {Items}", operation, stopwatch.ElapsedMilliseconds, resource, items.Count);
-        return new GestionEngineMetadataResult(resource, operation, search, null, items);
+        return new GestionEngineMetadataResult(resource, operation, search, listTotal, items);
     }
 
     public static bool IsSupported(string? resource, string? operation) =>

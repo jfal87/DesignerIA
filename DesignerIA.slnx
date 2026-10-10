@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="DesignerIA.Api/DesignerIA.Api.csproj" />
+  <Project Path="DesignerIA.Api.Tests/DesignerIA.Api.Tests.csproj" />
   <Project Path="DesignerIA.Contracts/DesignerIA.Contracts.csproj" />
   <Project Path="DesignerIA.Web/DesignerIA.Web.csproj" />
 </Solution>
