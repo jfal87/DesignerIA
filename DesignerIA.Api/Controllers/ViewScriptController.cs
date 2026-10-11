@@ -1,5 +1,4 @@
 using DesignerIA.Api.Services.ViewScripts;
-using DesignerIA.Api.Services.ViewSpecs;
 using DesignerIA.Contracts;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -7,9 +6,10 @@ using Microsoft.AspNetCore.Mvc;
 namespace DesignerIA.Api.Controllers;
 
 /// <summary>
-/// Genera un script SQL de sólo texto (nunca ejecutado) a partir de un
-/// <see cref="ViewSpec"/> ya construido, mediante código C# determinístico. No
-/// interviene el GitHub Copilot SDK en este endpoint.
+/// Genera un script SQL de sólo texto a partir de un <see cref="ViewSpec"/> ya
+/// construido, mediante código C# determinístico, y permite crear la vista cuando
+/// la creación está habilitada. No interviene el GitHub Copilot SDK en este
+/// controller y ningún endpoint acepta SQL del cliente.
 /// </summary>
 [ApiController]
 [Route("api/view-script")]
@@ -17,14 +17,14 @@ namespace DesignerIA.Api.Controllers;
 public class ViewScriptController : ControllerBase
 {
     private readonly ILogger<ViewScriptController> _logger;
-    private readonly ViewCreationPreflightService _preflightService;
+    private readonly ViewCreationService _creationService;
 
     public ViewScriptController(
         ILogger<ViewScriptController> logger,
-        ViewCreationPreflightService preflightService)
+        ViewCreationService creationService)
     {
         _logger = logger;
-        _preflightService = preflightService;
+        _creationService = creationService;
     }
 
     [HttpPost("generate")]
@@ -43,14 +43,8 @@ public class ViewScriptController : ControllerBase
         }
 
         var startedAt = DateTime.UtcNow;
-        var normalizedSpec = ViewSpecNormalizer.Normalize(spec);
-        var viewSpecValidation = ViewSpecValidator.Validate(normalizedSpec);
         var auditUser = identity is { IsAuthenticated: true } ? identity.Name : null;
-        var generationGaps = ViewScriptGenerationValidator.Validate(normalizedSpec, viewSpecValidation);
-        var preflight = generationGaps.Count == 0
-            ? await _preflightService.CheckAsync(normalizedSpec, cancellationToken)
-            : null;
-        var result = ViewScriptGenerator.Generate(normalizedSpec, preflight, auditUser);
+        var result = await _creationService.GenerateAsync(spec, auditUser, cancellationToken);
         var elapsedMs = (DateTime.UtcNow - startedAt).TotalMilliseconds;
 
         _logger.LogInformation(
@@ -65,5 +59,26 @@ public class ViewScriptController : ControllerBase
             result.Script?.Length ?? 0);
 
         return Ok(result);
+    }
+
+    /// <summary>
+    /// Crea la vista. No recibe el token de la petición a propósito: cerrar el
+    /// navegador no cancela una creación en curso.
+    /// </summary>
+    [HttpPost("create")]
+    public async Task<IActionResult> Create([FromBody] ViewSpec? spec)
+    {
+        if (spec is null)
+        {
+            return BadRequest(new { message = "El cuerpo debe incluir un ViewSpec." });
+        }
+
+        var result = await _creationService.CreateAsync(spec, User);
+        return result.Status switch
+        {
+            ViewCreationStatus.NotAllowed => StatusCode(StatusCodes.Status403Forbidden, result),
+            ViewCreationStatus.Busy => Conflict(result),
+            _ => Ok(result)
+        };
     }
 }
