@@ -1,0 +1,140 @@
+@using DesignerIA.Contracts
+
+@* Vista previa simulada de la vista en progreso. Dibuja la distribución que describe el mismo ViewSpec
+   (estado, fila, área y grilla); no ejecuta el Stored Procedure ni consulta nada. Las columnas y las
+   filas de la grilla son de ejemplo: el ViewSpec no define las columnas reales. *@
+<div class="viewpreview">
+    <div class="viewpreview-label">Vista previa simulada · Datos de ejemplo</div>
+
+    @if (Spec is null)
+    {
+        <div class="artifact-placeholder viewpreview-empty-state">
+            Todavía no hay una vista preparada. Usa «+ Nueva vista» o descríbela en la conversación para ver aquí su vista previa.
+        </div>
+    }
+    else
+    {
+        <div class="viewpreview-frame">
+            <div class="viewpreview-header">
+                <div class="viewpreview-title">@(string.IsNullOrWhiteSpace(Spec.Name) ? "(vista sin nombre)" : Spec.Name)</div>
+                @if (!string.IsNullOrWhiteSpace(Spec.Description))
+                {
+                    <div class="viewpreview-description">@Spec.Description</div>
+                }
+                <div class="viewpreview-meta">Tipo de vista: @(string.IsNullOrWhiteSpace(Spec.ViewType) ? "site" : Spec.ViewType)</div>
+            </div>
+
+            @if (Estados.Count == 0)
+            {
+                <div class="viewpreview-placeholder">La vista todavía no tiene estados definidos.</div>
+            }
+
+            @foreach (var estado in Estados)
+            {
+                <section class="viewpreview-state">
+                    <div class="viewpreview-level">
+                        Estado <strong>@(estado.Name ?? "(sin nombre)")</strong>
+                        @if (EsEstadoInicial(estado))
+                        {
+                            <span class="viewspec-badge">Estado inicial</span>
+                        }
+                    </div>
+
+                    @if ((estado.Rows ?? []).Count == 0)
+                    {
+                        <div class="viewpreview-placeholder">Estado sin filas: la vista se crea vacía, sin áreas ni objetos.</div>
+                    }
+
+                    @foreach (var fila in estado.Rows ?? [])
+                    {
+                        <div class="viewpreview-row">
+                            <div class="viewpreview-level">Fila <strong>@(fila.Name ?? "(sin nombre)")</strong></div>
+                            <div class="viewpreview-areas">
+                                @foreach (var area in fila.Areas ?? [])
+                                {
+                                    <div class="viewpreview-area">
+                                        <div class="viewpreview-level">
+                                            Área <strong>@(area.Name ?? "(sin nombre)")</strong>
+                                            @if (!string.IsNullOrWhiteSpace(area.ObjectName))
+                                            {
+                                                <span> · @(area.Type ?? "Objeto") <strong>@area.ObjectName</strong></span>
+                                            }
+                                        </div>
+
+                                        @if (EsGrilla(area))
+                                        {
+                                            <div class="viewpreview-grid-scroll">
+                                                <table class="viewpreview-grid">
+                                                    <thead>
+                                                        <tr>
+                                                            @foreach (var columna in ColumnasEjemplo)
+                                                            {
+                                                                <th>@columna</th>
+                                                            }
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        @foreach (var filaEjemplo in FilasEjemplo)
+                                                        {
+                                                            <tr>
+                                                                @foreach (var celda in filaEjemplo)
+                                                                {
+                                                                    <td>@celda</td>
+                                                                }
+                                                            </tr>
+                                                        }
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                            <div class="viewpreview-note">
+                                                Columnas y filas de ejemplo. El ViewSpec no define las columnas reales de
+                                                @(string.IsNullOrWhiteSpace(area.StoredProcedure) ? "su Stored Procedure" : area.StoredProcedure).
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <div class="viewpreview-placeholder">Objeto de tipo «@(area.Type ?? "sin definir")»: todavía sin vista previa.</div>
+                                        }
+
+                                        <div class="viewpreview-meta">
+                                            Stored Procedure: @(string.IsNullOrWhiteSpace(area.StoredProcedure) ? "pendiente" : area.StoredProcedure)
+                                            @if (!string.IsNullOrWhiteSpace(area.ConnectionAlias))
+                                            {
+                                                <span> · Alias de conexión: @area.ConnectionAlias</span>
+                                            }
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
+                </section>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>La misma definición que usa el resumen, la generación y la creación; null si no hay vista preparada.</summary>
+    [Parameter]
+    public ViewSpec? Spec { get; set; }
+
+    // Datos inventados y fijos, sólo para dar forma a la grilla. No proceden del Stored Procedure.
+    private static readonly string[] ColumnasEjemplo =
+        ["Código (ejemplo)", "Descripción (ejemplo)", "Valor A (ejemplo)", "Valor B (ejemplo)"];
+
+    private static readonly string[][] FilasEjemplo =
+    [
+        ["EJ-001", "Registro de ejemplo 1", "120", "45"],
+        ["EJ-002", "Registro de ejemplo 2", "98", "37"],
+        ["EJ-003", "Registro de ejemplo 3", "143", "52"],
+        ["EJ-004", "Registro de ejemplo 4", "76", "28"]
+    ];
+
+    private IReadOnlyList<ViewSpecState> Estados => Spec?.States ?? [];
+
+    private bool EsEstadoInicial(ViewSpecState estado) =>
+        !string.IsNullOrWhiteSpace(estado.Name) && string.Equals(estado.Name, Spec?.InitialState, StringComparison.OrdinalIgnoreCase);
+
+    private static bool EsGrilla(ViewSpecArea area) => string.Equals(area.Type, "Grilla", StringComparison.OrdinalIgnoreCase);
+}

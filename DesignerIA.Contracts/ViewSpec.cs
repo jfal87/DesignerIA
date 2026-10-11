@@ -19,7 +19,8 @@ public record ViewSpec(
     string? Name,
     string? Description,
     string? InitialState,
-    IReadOnlyList<ViewSpecState>? States);
+    IReadOnlyList<ViewSpecState>? States,
+    string? ViewType = null);
 
 /// <param name="Name">Nombre/clave del estado. Evidencia real (EngineUpdater.cs,
 /// CreateStates) confirma que dbo.Estados.Descripcion reutiliza siempre este mismo
@@ -30,7 +31,8 @@ public record ViewSpecState(
     IReadOnlyList<ViewSpecRow>? Rows);
 
 public record ViewSpecRow(
-    IReadOnlyList<ViewSpecArea>? Areas);
+    IReadOnlyList<ViewSpecArea>? Areas,
+    string? Name = null);
 
 /// <param name="StoredProcedure">Nombre del Stored Procedure real de SQL Server
 /// que alimenta esta área.</param>
@@ -43,7 +45,10 @@ public record ViewSpecArea(
     string? Type,
     string? StoredProcedure,
     string? ConnectionAlias,
-    IReadOnlyList<ViewSpecHandler>? Handlers);
+    IReadOnlyList<ViewSpecHandler>? Handlers,
+    string? Name = null,
+    string? ObjectName = null,
+    string? ConfigurationPreset = null);
 
 public record ViewSpecHandler(
     string? Type,

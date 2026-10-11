@@ -190,6 +190,8 @@ body {
     display: flex;
     flex-direction: column;
     min-height: 0;
+    /* Permite que el panel se encoja en una sola columna: la grilla de la vista previa se desplaza dentro de su marco. */
+    min-width: 0;
     height: calc(100vh - 7.5rem);
 }
 
@@ -277,6 +279,76 @@ body {
     background-color: var(--designeria-color-surface-muted);
     color: var(--designeria-color-text);
     border: 1px solid var(--designeria-color-border);
+}
+
+.chat-bubble-markdown > :first-child {
+    margin-top: 0;
+}
+
+.chat-bubble-markdown > :last-child {
+    margin-bottom: 0;
+}
+
+.chat-bubble-markdown p,
+.chat-bubble-markdown ul,
+.chat-bubble-markdown ol,
+.chat-bubble-markdown pre {
+    margin: 0 0 0.7rem;
+}
+
+.chat-bubble-markdown ul,
+.chat-bubble-markdown ol {
+    padding-left: 1.35rem;
+}
+
+.chat-bubble-markdown li + li {
+    margin-top: 0.2rem;
+}
+
+.chat-bubble-markdown h1,
+.chat-bubble-markdown h2,
+.chat-bubble-markdown h3,
+.chat-bubble-markdown h4,
+.chat-bubble-markdown h5,
+.chat-bubble-markdown h6 {
+    color: var(--designeria-color-primary-dark);
+    line-height: 1.25;
+    margin: 1rem 0 0.5rem;
+}
+
+.chat-bubble-markdown h1 { font-size: 1.25rem; }
+.chat-bubble-markdown h2 { font-size: 1.15rem; }
+.chat-bubble-markdown h3 { font-size: 1.05rem; }
+.chat-bubble-markdown h4,
+.chat-bubble-markdown h5,
+.chat-bubble-markdown h6 { font-size: 0.95rem; }
+
+.chat-bubble-markdown code {
+    padding: 0.1rem 0.3rem;
+    border-radius: 0.2rem;
+    background-color: rgba(23, 43, 77, 0.08);
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 0.88em;
+}
+
+.chat-bubble-markdown pre {
+    overflow-x: auto;
+    padding: 0.65rem;
+    border-radius: var(--designeria-radius-sm);
+    background-color: #172b4d;
+    color: #ffffff;
+}
+
+.chat-bubble-markdown pre code {
+    padding: 0;
+    background-color: transparent;
+    color: inherit;
+}
+
+.chat-bubble-markdown a {
+    color: var(--designeria-color-primary-dark);
+    text-decoration: underline;
+    text-underline-offset: 0.15rem;
 }
 
 .chat-message-assistant.chat-message-error .chat-bubble {
@@ -371,6 +443,14 @@ body {
 .viewspec-name {
     font-weight: 700;
     color: var(--designeria-color-primary-dark);
+    overflow-wrap: anywhere;
+}
+
+.viewspec-summary-detail {
+    font-size: 0.82rem;
+    color: var(--designeria-color-text-muted);
+    margin-bottom: 0.25rem;
+    overflow-wrap: anywhere;
 }
 
 .viewspec-state {
@@ -524,6 +604,227 @@ body {
     margin: 0;
 }
 
+/* ---------- Panel central: conmutador entre conversación y vista previa ---------- */
+
+.workspace-tabs {
+    display: flex;
+    gap: 0.25rem;
+    margin-bottom: 0.6rem;
+    border-bottom: 1px solid var(--designeria-color-border);
+}
+
+.workspace-tab {
+    border: none;
+    border-bottom: 2px solid transparent;
+    background: none;
+    padding: 0.4rem 0.85rem;
+    margin-bottom: -1px;
+    font-family: var(--designeria-font-family);
+    font-size: 0.85rem;
+    color: var(--designeria-color-text-muted);
+    cursor: pointer;
+}
+
+.workspace-tab:hover {
+    color: var(--designeria-color-primary-dark);
+}
+
+.workspace-tab-active {
+    border-bottom-color: var(--designeria-color-primary);
+    color: var(--designeria-color-primary-dark);
+    font-weight: 600;
+}
+
+.chat-conversation {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.chat-conversation[hidden] {
+    display: none;
+}
+
+/* ---------- Vista previa simulada de la vista en progreso ---------- */
+
+.viewpreview {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.viewpreview-label {
+    align-self: flex-start;
+    padding: 0.2rem 0.65rem;
+    border: 1px solid var(--designeria-color-warning);
+    border-radius: 999px;
+    background-color: var(--designeria-color-warning-bg);
+    color: var(--designeria-color-warning);
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+.viewpreview-empty-state {
+    padding: 2rem 1rem;
+}
+
+.viewpreview-frame {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 0.9rem;
+    border: 1px solid var(--designeria-color-border);
+    border-radius: var(--designeria-radius);
+    background-color: var(--designeria-color-surface);
+}
+
+.viewpreview-header {
+    padding-bottom: 0.6rem;
+    border-bottom: 1px solid var(--designeria-color-border);
+}
+
+.viewpreview-title {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--designeria-color-primary-dark);
+    overflow-wrap: anywhere;
+}
+
+.viewpreview-description {
+    font-size: 0.9rem;
+    color: var(--designeria-color-text);
+    overflow-wrap: anywhere;
+}
+
+.viewpreview-meta {
+    font-size: 0.75rem;
+    color: var(--designeria-color-text-muted);
+    overflow-wrap: anywhere;
+}
+
+.viewpreview-level {
+    font-size: 0.78rem;
+    color: var(--designeria-color-text-muted);
+    margin-bottom: 0.4rem;
+    overflow-wrap: anywhere;
+}
+
+.viewpreview-level strong {
+    color: var(--designeria-color-text);
+}
+
+.viewpreview-state {
+    padding: 0.7rem;
+    border: 1px solid var(--designeria-color-border);
+    border-radius: var(--designeria-radius-sm);
+    background-color: var(--designeria-color-surface-muted);
+}
+
+.viewpreview-row {
+    padding: 0.6rem;
+    border: 1px dashed var(--designeria-color-border);
+    border-radius: var(--designeria-radius-sm);
+    background-color: var(--designeria-color-surface);
+}
+
+.viewpreview-row + .viewpreview-row {
+    margin-top: 0.6rem;
+}
+
+.viewpreview-areas {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+}
+
+.viewpreview-area {
+    flex: 1 1 320px;
+    min-width: 0;
+    padding: 0.6rem;
+    border: 1px solid var(--designeria-color-border);
+    border-radius: var(--designeria-radius-sm);
+    background-color: var(--designeria-color-surface);
+}
+
+.viewpreview-grid-scroll {
+    overflow-x: auto;
+    border: 1px solid var(--designeria-color-border);
+    border-radius: var(--designeria-radius-sm);
+}
+
+.viewpreview-grid {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+
+.viewpreview-grid th,
+.viewpreview-grid td {
+    padding: 0.4rem 0.6rem;
+    text-align: left;
+    white-space: nowrap;
+    border-bottom: 1px solid var(--designeria-color-border);
+}
+
+.viewpreview-grid th {
+    background-color: var(--designeria-color-surface-muted);
+    color: var(--designeria-color-primary-dark);
+    font-weight: 600;
+}
+
+.viewpreview-grid tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.viewpreview-note {
+    margin: 0.4rem 0;
+    font-size: 0.75rem;
+    font-style: italic;
+    color: var(--designeria-color-warning);
+    overflow-wrap: anywhere;
+}
+
+.viewpreview-placeholder {
+    padding: 0.85rem;
+    border: 1px dashed var(--designeria-color-border);
+    border-radius: var(--designeria-radius-sm);
+    text-align: center;
+    font-size: 0.82rem;
+    color: var(--designeria-color-text-muted);
+}
+
+/* ---------- Creación de la vista: confirmación y resultado ---------- */
+
+.viewcreation-confirm {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+    padding: 0.6rem;
+    border: 1px solid var(--designeria-color-primary);
+    border-radius: var(--designeria-radius-sm);
+    font-size: 0.8rem;
+}
+
+.viewcreation-diagnostics {
+    margin-top: 0.35rem;
+    font-size: 0.75rem;
+    color: var(--designeria-color-text-muted);
+}
+
+.viewcreation-diagnostics summary {
+    cursor: pointer;
+}
+
+.viewcreation-open-link {
+    display: inline-block;
+    margin-bottom: 0.35rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--designeria-color-primary-dark);
+}
+
 .sidebar-section-title {
     font-weight: 600;
     color: var(--designeria-color-primary-dark);
@@ -577,6 +878,36 @@ body {
 }
 
 /* ---------- Modals (Enseñar a DesignerIA / Laboratorio de conocimiento) ---------- */
+
+.view-template-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    border: 1px solid var(--designeria-color-border);
+    border-radius: var(--designeria-radius-sm);
+    padding: 0.85rem;
+    background-color: var(--designeria-color-surface);
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.view-template-card:hover,
+.view-template-card:focus-visible {
+    border-color: var(--designeria-color-primary);
+    background-color: var(--designeria-color-surface-muted);
+}
+
+.view-template-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--designeria-color-primary-dark);
+}
+
+.view-template-description {
+    font-size: 0.82rem;
+    color: var(--designeria-color-text-muted);
+}
 
 .modal-overlay {
     position: fixed;
