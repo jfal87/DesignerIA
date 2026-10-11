@@ -23,7 +23,7 @@ El plazo inicialmente planteado fue el jueves 15 de octubre de 2026 para demostr
 | **7. Entrada asistida** | Lenguaje natural y después Word | Preparan el mismo contrato, preguntan datos faltantes y usan la misma validación y creación |
 | **8. Edición** | Leer una vista compatible, modificarla y guardar | Se conservan estructura, configuración, relaciones y JS; los componentes no soportados se detectan antes de permitir editar |
 
-Estado al 10 de octubre de 2026: fase 1 cerrada; fase 2 cerrada con el contrato técnico y el plan de fase 3 revisados (`DesignerIA-Fase02-Contrato.md` y `DesignerIA-Fase03-Plan.md`), sin implementación ni comprobación en runtime. Fases 3–8 no implementadas. No confundir una definición acordada con código terminado.
+Estado al 10 de octubre de 2026: fases 1 y 2 cerradas; fase 3 cerrada funcionalmente en el ambiente local, con generación, pruebas y comprobación HTTP y visual reportadas en `DesignerIA-Fase03-Informe.md`. El script generado no se ejecutó: no hay metadata aplicada ni comprobación en Motor. Fases 4–8 no implementadas; el punto de partida de la fase 4 está en `DesignerIA-Fase04-Checkpoint.md`. La tabla de la sección 4 describe el código anterior a la fase 3. No confundir un script generado con una vista creada.
 
 La fase 4 tiene dos checkpoints: **metadata local comprobada** y **Motor comprobado**. El primero permite avanzar en trabajo local, pero no cierra por sí solo la fase ni acredita funcionamiento del runtime.
 
