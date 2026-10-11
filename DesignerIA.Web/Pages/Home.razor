@@ -21,6 +21,7 @@
     <div class="workspace-content">
         <nav class="nav-rail">
             <RadzenButton Text="+ Nueva conversación" ButtonStyle="Radzen.ButtonStyle.Light" Click="@NuevaConversacion" Disabled="@_enviando" />
+            <RadzenButton Text="+ Nueva vista" ButtonStyle="Radzen.ButtonStyle.Light" Click="@AbrirNuevaVista" Disabled="@_preparandoVista" />
             <div class="nav-rail-placeholder">El historial de conversaciones estará disponible próximamente.</div>
 
             <div class="nav-rail-secondary">
@@ -40,6 +41,24 @@
         </nav>
 
         <section class="chat-panel">
+            <div class="workspace-tabs" role="tablist">
+                <button type="button" role="tab" aria-selected="@(!_mostrarVistaPrevia)"
+                        class="workspace-tab @(_mostrarVistaPrevia ? "" : "workspace-tab-active")"
+                        @onclick="@(() => _mostrarVistaPrevia = false)">Conversación</button>
+                <button type="button" role="tab" aria-selected="@_mostrarVistaPrevia"
+                        class="workspace-tab @(_mostrarVistaPrevia ? "workspace-tab-active" : "")"
+                        @onclick="@(() => _mostrarVistaPrevia = true)">Vista previa</button>
+            </div>
+
+            @if (_mostrarVistaPrevia)
+            {
+                <RadzenCard Variant="Radzen.Variant.Flat" class="chat-scroll">
+                    <ViewSpecPreview Spec="@_vistaEnProgreso?.Spec" />
+                </RadzenCard>
+            }
+
+            @* La conversación se oculta, no se desmonta: conserva mensajes, borrador y desplazamiento. *@
+            <div class="chat-conversation" hidden="@_mostrarVistaPrevia">
             <RadzenCard Variant="Radzen.Variant.Flat" class="chat-scroll">
                 @if (_mensajes.Count == 0)
                 {
@@ -78,7 +97,14 @@
                             }
                             else
                             {
-                                <div class="chat-bubble">@mensaje.Texto</div>
+                                @if (!mensaje.EsUsuario && !mensaje.EsError && !mensaje.EsCreacionVista)
+                                {
+                                    <div class="chat-bubble chat-bubble-markdown">@mensaje.Html</div>
+                                }
+                                else
+                                {
+                                    <div class="chat-bubble">@mensaje.Texto</div>
+                                }
                             }
                             @if (mensaje.ToolInvoked)
                             {
@@ -133,6 +159,7 @@
                     }
                 </RadzenButton>
             </div>
+            </div>
         </section>
 
         <aside class="context-panel">
@@ -182,6 +209,10 @@
                         {
                             <div class="viewspec-panel">
                                 <div class="viewspec-name">@(_vistaEnProgreso.Spec.Name ?? "(vista sin nombre)")</div>
+                                @if (!string.IsNullOrWhiteSpace(_vistaEnProgreso.Spec.ViewType))
+                                {
+                                    <div class="viewspec-summary-detail">Tipo de vista: @_vistaEnProgreso.Spec.ViewType</div>
+                                }
 
                                 @foreach (var estado in _vistaEnProgreso.Spec.States ?? Array.Empty<ViewSpecState>())
                                 {
@@ -195,11 +226,31 @@
                                         </div>
                                         @foreach (var fila in estado.Rows ?? Array.Empty<ViewSpecRow>())
                                         {
+                                            @if (!string.IsNullOrWhiteSpace(fila.Name))
+                                            {
+                                                <div class="viewspec-summary-detail">Fila: @fila.Name</div>
+                                            }
                                             @foreach (var area in fila.Areas ?? Array.Empty<ViewSpecArea>())
                                             {
                                                 <div class="viewspec-area">
                                                     <div class="viewspec-area-type">@(area.Type ?? "Área")</div>
-                                                    <div class="viewspec-area-detail">Stored Procedure: @(area.StoredProcedure ?? "pendiente")</div>
+                                                    @if (!string.IsNullOrWhiteSpace(area.Name))
+                                                    {
+                                                        <div class="viewspec-summary-detail">Área: @area.Name</div>
+                                                    }
+                                                    @if (!string.IsNullOrWhiteSpace(area.ObjectName))
+                                                    {
+                                                        <div class="viewspec-summary-detail">Objeto: @area.ObjectName</div>
+                                                    }
+                                                    <div class="viewspec-area-detail viewspec-summary-detail">Stored Procedure: @(string.IsNullOrWhiteSpace(area.StoredProcedure) ? "pendiente" : area.StoredProcedure)</div>
+                                                    @if (!string.IsNullOrWhiteSpace(area.ConnectionAlias))
+                                                    {
+                                                        <div class="viewspec-summary-detail">Alias de conexión: @area.ConnectionAlias</div>
+                                                    }
+                                                    @if (!string.IsNullOrWhiteSpace(area.ConfigurationPreset))
+                                                    {
+                                                        <div class="viewspec-summary-detail">Preset de configuración: @area.ConfigurationPreset</div>
+                                                    }
                                                     @foreach (var handler in area.Handlers ?? Array.Empty<ViewSpecHandler>())
                                                     {
                                                         <div class="viewspec-handler">@(handler.Type ?? "Handler") → @(handler.TargetState ?? "pendiente")</div>
@@ -265,8 +316,24 @@
                                             @onclick="GenerarScriptAsync">
                                         @(_generandoScript ? "Generando..." : "Generar script")
                                     </button>
-                                    <button type="button" class="viewspec-action-disabled" disabled title="Todavía no disponible">Crear vista</button>
+                                    <button type="button" class="viewspec-action"
+                                            disabled="@(_creandoVista || _confirmandoCreacion || _generandoScript || _vistaEnProgreso.Validation.Errors.Count > 0)"
+                                            title="@(_vistaEnProgreso.Validation.Errors.Count > 0 ? "La vista tiene errores estructurales" : "Crear la vista en la base de metadata")"
+                                            @onclick="PedirConfirmacionCrear">
+                                        @(_creandoVista ? "Creando..." : "Crear vista")
+                                    </button>
                                 </div>
+
+                                @if (_confirmandoCreacion)
+                                {
+                                    <div class="viewcreation-confirm">
+                                        <div>Se creará la vista «@_vistaEnProgreso.Spec.Name» en la base de metadata. DesignerIA no puede deshacerla.</div>
+                                        <div class="viewspec-actions">
+                                            <button type="button" class="viewspec-action" @onclick="CrearVistaAsync">Confirmar creación</button>
+                                            <button type="button" class="viewspec-action" @onclick="CancelarConfirmacionCrear">Cancelar</button>
+                                        </div>
+                                    </div>
+                                }
 
                                 @if (_resultadoScript is not null)
                                 {
@@ -292,11 +359,109 @@
                             </div>
                         }
                     </div>
+
+                    @* Progreso y resultado de la creación: no dependen de la vista en progreso ni de la
+                       conversación, porque describen una escritura que ya pudo ocurrir en la base. *@
+                    @if (_creandoVista || _resultadoCreacion is not null)
+                    {
+                        <div>
+                            <RadzenText TextStyle="Radzen.Blazor.TextStyle.Subtitle2" class="context-panel-section-title">Creación de vista</RadzenText>
+                            <div class="viewscript-panel">
+                                @if (_creandoVista)
+                                {
+                                    <div class="viewscript-status-warning">Creando «@_nombreCreacion»… Espera el resultado.</div>
+                                }
+                                else if (_resultadoCreacion is not null)
+                                {
+                                    <div class="@(_resultadoCreacion.Status == ViewCreationStatus.Created ? "viewscript-status-ok" : "viewscript-status-warning")">
+                                        «@_nombreCreacion»: @_resultadoCreacion.Message
+                                    </div>
+                                    @if (_resultadoCreacion.Status == ViewCreationStatus.Created && !string.IsNullOrWhiteSpace(_resultadoCreacion.ViewUrl))
+                                    {
+                                        <a class="viewcreation-open-link" href="@_resultadoCreacion.ViewUrl" target="_blank" rel="noopener noreferrer">Abrir vista</a>
+                                    }
+                                    @if (_resultadoCreacion.Gaps.Count > 0)
+                                    {
+                                        <ul class="viewspec-pending-list">
+                                            @foreach (var gap in _resultadoCreacion.Gaps)
+                                            {
+                                                <li><strong>@gap.Topic:</strong> @gap.Description</li>
+                                            }
+                                        </ul>
+                                    }
+                                    @if (_resultadoCreacion.Diagnostics.Count > 0)
+                                    {
+                                        <details class="viewcreation-diagnostics">
+                                            <summary>Diagnóstico</summary>
+                                            <ul class="viewspec-pending-list">
+                                                @foreach (var linea in _resultadoCreacion.Diagnostics)
+                                                {
+                                                    <li>@linea</li>
+                                                }
+                                            </ul>
+                                        </details>
+                                    }
+                                    <button type="button" class="viewscript-copy-button" @onclick="OcultarResultadoCreacion">Ocultar</button>
+                                }
+                            </div>
+                        </div>
+                    }
                 </RadzenStack>
             </RadzenCard>
         </aside>
     </div>
 </div>
+
+@if (_mostrarNuevaVista)
+{
+    <div class="modal-overlay">
+        <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="nueva-vista-title">
+            <div class="modal-title" id="nueva-vista-title">@(_mostrarFormularioNuevaVista ? "Consulta con grilla" : "Nueva vista")</div>
+            <div class="modal-body">
+                @if (!_mostrarFormularioNuevaVista)
+                {
+                    <button type="button" class="view-template-card" @onclick="SeleccionarConsultaConGrilla">
+                        <span class="view-template-title">Consulta con grilla</span>
+                        <span class="view-template-description">Una grilla alimentada por un Stored Procedure.</span>
+                    </button>
+                }
+                else
+                {
+                    <label class="modal-label" for="nueva-vista-nombre">Nombre / IdVista</label>
+                    <input class="modal-input" id="nueva-vista-nombre" @bind="_nombreNuevaVista" disabled="@_preparandoVista" />
+
+                    <label class="modal-label" for="nueva-vista-descripcion">Descripción (opcional)</label>
+                    <textarea class="modal-textarea" id="nueva-vista-descripcion" rows="2" @bind="_descripcionNuevaVista" disabled="@_preparandoVista" aria-describedby="nueva-vista-descripcion-ayuda"></textarea>
+                    <RadzenText TextStyle="Radzen.Blazor.TextStyle.Caption" id="nueva-vista-descripcion-ayuda">Si la dejas vacía, se usará el nombre.</RadzenText>
+
+                    <label class="modal-label" for="nueva-vista-sp">Stored Procedure</label>
+                    <input class="modal-input" id="nueva-vista-sp" @bind="_storedProcedureNuevaVista" disabled="@_preparandoVista" />
+
+                    <label class="modal-label" for="nueva-vista-alias">Alias de conexión</label>
+                    <input class="modal-input" id="nueva-vista-alias" @bind="_aliasConexionNuevaVista" disabled="@_preparandoVista" />
+
+                    @if (!string.IsNullOrWhiteSpace(_mensajeNuevaVista))
+                    {
+                        <div class="modal-message" role="status">@_mensajeNuevaVista</div>
+                    }
+                }
+            </div>
+            <div class="modal-actions">
+                @if (_mostrarFormularioNuevaVista)
+                {
+                    <button type="button" class="modal-button-secondary" disabled="@_preparandoVista" @onclick="VolverGaleriaVistas">Volver</button>
+                }
+                <button type="button" class="modal-button-secondary" disabled="@_preparandoVista" @onclick="CerrarNuevaVista">Cerrar</button>
+                @if (_mostrarFormularioNuevaVista)
+                {
+                    <button type="button" class="modal-button-primary" disabled="@_preparandoVista" @onclick="PrepararVistaAsync">
+                        @(_preparandoVista ? "Preparando..." : "Preparar vista")
+                    </button>
+                }
+            </div>
+        </div>
+    </div>
+}
 
 @if (_mostrarFormularioEnsenar)
 {
@@ -388,9 +553,14 @@
         IReadOnlyList<KnowledgeSourceReference>? Fuentes = null,
         bool EsCreacionVista = false,
         bool VistaValida = false,
-        string? NombreVista = null);
+        string? NombreVista = null)
+    {
+        public MarkupString Html { get; } = !EsUsuario && !EsError && !EsCreacionVista
+            ? MarkdownChatRenderer.Render(Texto) : default;
+    }
 
     private readonly List<ChatMessage> _mensajes = new();
+    private string _conversationId = Guid.NewGuid().ToString();
     private string _mensajeActual = string.Empty;
     private bool _enviando;
     private ChatResult? _ultimoResultadoChat;
@@ -399,9 +569,27 @@
     // petición de creación de vista dentro de la misma página reemplaza la actual.
     private ViewSpecResult? _vistaEnProgreso;
 
+    // El panel central alterna entre la conversación y la vista previa simulada de _vistaEnProgreso.
+    private bool _mostrarVistaPrevia;
+
+    private bool _mostrarNuevaVista;
+    private bool _mostrarFormularioNuevaVista;
+    private bool _preparandoVista;
+    private string _nombreNuevaVista = string.Empty;
+    private string _descripcionNuevaVista = string.Empty;
+    private string _storedProcedureNuevaVista = "dbo.PRC_GET_GRID_TEST_SORT_COLUMN";
+    private string _aliasConexionNuevaVista = "GestionEngine";
+    private string? _mensajeNuevaVista;
+
     // ---- ViewScriptGen: generación determinística de SQL de sólo previsualización ----
     private bool _generandoScript;
     private ViewScriptGenerationResult? _resultadoScript;
+
+    // ---- Creación de la vista: el SQL se genera y ejecuta en la API; aquí sólo viaja el ViewSpec ----
+    private bool _confirmandoCreacion;
+    private bool _creandoVista;
+    private ViewCreationResult? _resultadoCreacion;
+    private string? _nombreCreacion;
 
     private bool _actualizandoConocimiento;
     private KnowledgeRebuildResult? _ultimoRebuild;
@@ -487,25 +675,92 @@
             return;
         }
 
+        var vista = _vistaEnProgreso;
         _generandoScript = true;
         _resultadoScript = null;
         try
         {
-            var respuesta = await Http.PostAsJsonAsync("api/view-script/generate", _vistaEnProgreso.Spec);
+            var respuesta = await Http.PostAsJsonAsync("api/view-script/generate", vista.Spec);
             if (respuesta.IsSuccessStatusCode)
             {
-                _resultadoScript = await respuesta.Content.ReadFromJsonAsync<ViewScriptGenerationResult>();
+                var resultado = await respuesta.Content.ReadFromJsonAsync<ViewScriptGenerationResult>();
+                if (ReferenceEquals(_vistaEnProgreso, vista))
+                {
+                    _resultadoScript = resultado;
+                }
             }
         }
         catch
         {
-            _resultadoScript = null;
+            if (ReferenceEquals(_vistaEnProgreso, vista))
+            {
+                _resultadoScript = null;
+            }
         }
         finally
         {
             _generandoScript = false;
         }
     }
+
+    private void PedirConfirmacionCrear()
+    {
+        if (_vistaEnProgreso is not null && !_creandoVista)
+        {
+            _confirmandoCreacion = true;
+        }
+    }
+
+    private void CancelarConfirmacionCrear() => _confirmandoCreacion = false;
+
+    private void OcultarResultadoCreacion()
+    {
+        if (!_creandoVista)
+        {
+            _resultadoCreacion = null;
+        }
+    }
+
+    private async Task CrearVistaAsync()
+    {
+        // _creandoVista evita un doble envío mientras la API responde.
+        if (_vistaEnProgreso is null || _creandoVista)
+        {
+            return;
+        }
+
+        var vista = _vistaEnProgreso;
+        _creandoVista = true;
+        _confirmandoCreacion = false;
+        _resultadoCreacion = null;
+        _nombreCreacion = vista.Spec.Name;
+        try
+        {
+            var respuesta = await Http.PostAsJsonAsync("api/view-script/create", vista.Spec);
+            // 200, 403 y 409 traen un ViewCreationResult. El resultado se muestra aunque la vista
+            // en progreso haya cambiado: describe una escritura que ya pudo ocurrir.
+            if (respuesta.StatusCode is System.Net.HttpStatusCode.OK or System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.Conflict)
+            {
+                var opciones = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+                opciones.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+                _resultadoCreacion = await respuesta.Content.ReadFromJsonAsync<ViewCreationResult>(opciones);
+            }
+            _resultadoCreacion ??= ResultadoCreacionSinRespuesta($"La API respondió {(int)respuesta.StatusCode}.");
+        }
+        catch (Exception excepcion)
+        {
+            _resultadoCreacion = ResultadoCreacionSinRespuesta($"No se recibió la respuesta de la API ({excepcion.GetType().Name}).");
+        }
+        finally
+        {
+            _creandoVista = false;
+        }
+    }
+
+    // La API no cancela una creación porque se pierda la petición: sin respuesta, el resultado no se conoce.
+    private static ViewCreationResult ResultadoCreacionSinRespuesta(string detalle) => new(
+        ViewCreationStatus.Indeterminate, null,
+        "No se pudo confirmar si la vista se creó. Comprueba la base antes de volver a intentarlo.", [], [detalle]);
 
     private async Task CopiarScriptAsync()
     {
@@ -566,9 +821,13 @@
     private void NuevaConversacion()
     {
         _mensajes.Clear();
+        _conversationId = Guid.NewGuid().ToString();
         _mensajeActual = string.Empty;
         _ultimoResultadoChat = null;
         _vistaEnProgreso = null;
+        _resultadoScript = null;
+        _confirmandoCreacion = false;
+        // El progreso y el resultado de una creación se conservan: no pertenecen a la conversación.
     }
 
     private Task EnviarStarterAsync(string texto)
@@ -591,7 +850,13 @@
 
         try
         {
-            var respuesta = await Http.PostAsJsonAsync("api/copilot/chat", new ChatRequest(texto));
+            var respuesta = await Http.PostAsJsonAsync("api/copilot/chat", new ChatRequest(texto, _conversationId));
+            if (_estado is null)
+            {
+                // La Api volvió a responder tras un fallo de contacto: se refresca el indicador.
+                await ConsultarEstadoAsync();
+            }
+
             var resultado = await respuesta.Content.ReadFromJsonAsync<ChatResult>();
             _ultimoResultadoChat = resultado;
 
@@ -611,6 +876,8 @@
                 if (resultado.ViewSpecResult is not null)
                 {
                     _vistaEnProgreso = resultado.ViewSpecResult;
+                    _resultadoScript = null;
+                    _confirmandoCreacion = false;
                 }
             }
             else
@@ -618,8 +885,14 @@
                 _mensajes.Add(new ChatMessage(resultado?.Error ?? "DesignerIA no pudo responder.", EsUsuario: false, ToolInvoked: false, EsError: true));
             }
         }
-        catch
+        catch (Exception ex)
         {
+            if (ex is HttpRequestException or TaskCanceledException)
+            {
+                // Sin respuesta HTTP (red o timeout): el indicador no puede seguir en "Disponible".
+                _estado = null;
+            }
+
             _ultimoResultadoChat = new ChatResult("error", null, false, "No se pudo contactar a la Api.");
             _mensajes.Add(new ChatMessage("No se pudo contactar a la Api.", EsUsuario: false, ToolInvoked: false, EsError: true));
         }
@@ -649,6 +922,81 @@
         finally
         {
             _actualizandoConocimiento = false;
+        }
+    }
+
+    private void AbrirNuevaVista()
+    {
+        _nombreNuevaVista = string.Empty;
+        _descripcionNuevaVista = string.Empty;
+        _storedProcedureNuevaVista = "dbo.PRC_GET_GRID_TEST_SORT_COLUMN";
+        _aliasConexionNuevaVista = "GestionEngine";
+        _mensajeNuevaVista = null;
+        _mostrarFormularioNuevaVista = false;
+        _mostrarNuevaVista = true;
+    }
+
+    private void SeleccionarConsultaConGrilla()
+    {
+        _mostrarFormularioNuevaVista = true;
+    }
+
+    private void VolverGaleriaVistas()
+    {
+        _mensajeNuevaVista = null;
+        _mostrarFormularioNuevaVista = false;
+    }
+
+    private void CerrarNuevaVista()
+    {
+        _mostrarNuevaVista = false;
+    }
+
+    private async Task PrepararVistaAsync()
+    {
+        if (_preparandoVista)
+        {
+            return;
+        }
+
+        _preparandoVista = true;
+        _mensajeNuevaVista = null;
+        try
+        {
+            var request = new GridQueryTemplateRequest(
+                _nombreNuevaVista,
+                _descripcionNuevaVista,
+                _storedProcedureNuevaVista,
+                _aliasConexionNuevaVista);
+
+            var respuesta = await Http.PostAsJsonAsync("api/view-templates/grid-query", request);
+            if (respuesta.IsSuccessStatusCode)
+            {
+                var resultado = await respuesta.Content.ReadFromJsonAsync<ViewSpecResult>();
+                if (resultado is not null)
+                {
+                    _vistaEnProgreso = resultado;
+                    _resultadoScript = null;
+                    _confirmandoCreacion = false;
+                    _mostrarNuevaVista = false;
+                }
+                else
+                {
+                    _mensajeNuevaVista = "No se pudo preparar la vista. Intenta nuevamente.";
+                }
+            }
+            else
+            {
+                _mensajeNuevaVista = "No se pudo preparar la vista. Intenta nuevamente.";
+            }
+        }
+        catch
+        {
+            _mensajeNuevaVista = "No se pudo contactar a la Api.";
+        }
+        finally
+        {
+            _preparandoVista = false;
         }
     }
 

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using DesignerIA.Api.Services.Knowledge;
 using DesignerIA.Contracts;
 using GitHub.Copilot;
@@ -21,14 +22,24 @@ public static class KnowledgeSearchTool
         KnowledgeSearchService knowledgeSearchService,
         ILogger logger,
         Action<IReadOnlyList<KnowledgeSearchResultItem>> onInvoked,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<long>? onSearchCompleted = null)
     {
         return CopilotTool.DefineTool(
             (
                 [Description("Consulta en texto libre sobre documentación interna de DesignerIA/GestionEngine, por ejemplo el nombre de un handler o una funcionalidad.")]
                 string query) =>
             {
-                var results = knowledgeSearchService.Search(query);
+                var stopwatch = Stopwatch.StartNew();
+                IReadOnlyList<KnowledgeSearchResultItem> results;
+                try
+                {
+                    results = knowledgeSearchService.Search(query);
+                }
+                finally
+                {
+                    onSearchCompleted?.Invoke(stopwatch.ElapsedMilliseconds);
+                }
                 onInvoked(results);
                 logger.LogInformation(
                     "Custom tool {ToolName} invoked. ResultsCount: {ResultsCount}",

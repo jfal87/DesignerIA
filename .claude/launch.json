@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "designeria-api",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "DesignerIA.Api", "--launch-profile", "https"],
+      "port": 7089,
+      "url": "https://localhost:7089"
+    },
+    {
+      "name": "designeria-web",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "DesignerIA.Web", "--launch-profile", "https"],
+      "port": 7276,
+      "url": "https://localhost:7276"
+    }
+  ]
+}

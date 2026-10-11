@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DesignerIA.Contracts\DesignerIA.Contracts.csproj" />
+    <InternalsVisibleTo Include="DesignerIA.Api.Tests" />
   </ItemGroup>
 
 </Project>
