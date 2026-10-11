@@ -13,6 +13,8 @@ namespace DesignerIA.Api.Services.ViewSpecs;
 /// </summary>
 public static class ViewSpecValidator
 {
+    public static StringComparer StateNameComparer { get; } = StringComparer.OrdinalIgnoreCase;
+
     public static ViewSpecValidationResult Validate(ViewSpec spec)
     {
         var errors = new List<string>();
@@ -33,7 +35,13 @@ public static class ViewSpecValidator
             .Select(s => s.Name)
             .Where(n => !string.IsNullOrWhiteSpace(n))
             .Select(n => n!)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            .ToHashSet(StateNameComparer);
+
+        if (states.Where(s => !string.IsNullOrWhiteSpace(s.Name))
+            .GroupBy(s => s.Name!, StateNameComparer).Any(group => group.Count() > 1))
+        {
+            errors.Add("La vista tiene nombres de estado duplicados.");
+        }
 
         if (string.IsNullOrWhiteSpace(spec.InitialState))
         {

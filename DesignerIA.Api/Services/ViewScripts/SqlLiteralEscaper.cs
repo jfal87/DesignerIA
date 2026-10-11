@@ -9,6 +9,10 @@ namespace DesignerIA.Api.Services.ViewScripts;
 /// </summary>
 public static class SqlLiteralEscaper
 {
+    /// <summary>Devuelve un literal escapado entre comillas, con prefijo Unicode opcional.</summary>
+    public static string Literal(string value, bool unicode = true) =>
+        (unicode ? "N" : string.Empty) + "'" + EscapeLiteral(value) + "'";
+
     /// <summary>
     /// Devuelve el valor listo para usarse entre comillas simples en SQL, por
     /// ejemplo: <c>EscapeLiteral("O'Brien")</c> devuelve <c>O''Brien</c>. El

@@ -46,32 +46,11 @@ public class ViewScriptController : ControllerBase
         var normalizedSpec = ViewSpecNormalizer.Normalize(spec);
         var viewSpecValidation = ViewSpecValidator.Validate(normalizedSpec);
         var auditUser = identity is { IsAuthenticated: true } ? identity.Name : null;
-        ViewScriptGenerationResult result;
-
-        if (!viewSpecValidation.IsValid)
-        {
-            result = ViewScriptGenerator.Generate(normalizedSpec, viewSpecValidation, auditUser);
-        }
-        else
-        {
-            var plan = ViewCreationPlanFactory.Create(normalizedSpec);
-            var preflight = await _preflightService.CheckNameAsync(normalizedSpec.Name!, cancellationToken);
-            if (!preflight.IsAvailable)
-            {
-                result = new ViewScriptGenerationResult(
-                    CanGenerate: false,
-                    Script: null,
-                    Gaps: [new ViewScriptGenerationGap(
-                        "Nombre de vista existente",
-                        "Ya existe una vista con el nombre indicado; no se generó un script que pueda sobrescribirla.")],
-                    Summary: BuildSummary(normalizedSpec),
-                    Preflight: preflight);
-            }
-            else
-            {
-                result = ViewScriptGenerator.Generate(plan, BuildSummary(normalizedSpec), auditUser) with { Preflight = preflight };
-            }
-        }
+        var generationGaps = ViewScriptGenerationValidator.Validate(normalizedSpec, viewSpecValidation);
+        var preflight = generationGaps.Count == 0
+            ? await _preflightService.CheckAsync(normalizedSpec, cancellationToken)
+            : null;
+        var result = ViewScriptGenerator.Generate(normalizedSpec, preflight, auditUser);
         var elapsedMs = (DateTime.UtcNow - startedAt).TotalMilliseconds;
 
         _logger.LogInformation(
@@ -86,14 +65,5 @@ public class ViewScriptController : ControllerBase
             result.Script?.Length ?? 0);
 
         return Ok(result);
-    }
-
-    private static ViewScriptGenerationSummary BuildSummary(ViewSpec spec)
-    {
-        var states = spec.States ?? [];
-        var rows = states.SelectMany(state => state.Rows ?? []).ToList();
-        var areas = rows.SelectMany(row => row.Areas ?? []).ToList();
-        var handlers = areas.SelectMany(area => area.Handlers ?? []).ToList();
-        return new ViewScriptGenerationSummary(1, states.Count, rows.Count, areas.Count, handlers.Count);
     }
 }

@@ -443,6 +443,13 @@ body {
     color: var(--designeria-color-primary-dark);
 }
 
+.viewspec-summary-detail {
+    font-size: 0.82rem;
+    color: var(--designeria-color-text-muted);
+    margin-bottom: 0.25rem;
+    overflow-wrap: anywhere;
+}
+
 .viewspec-state {
     border: 1px solid var(--designeria-color-border);
     border-radius: var(--designeria-radius-sm);
@@ -647,6 +654,36 @@ body {
 }
 
 /* ---------- Modals (Enseñar a DesignerIA / Laboratorio de conocimiento) ---------- */
+
+.view-template-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    border: 1px solid var(--designeria-color-border);
+    border-radius: var(--designeria-radius-sm);
+    padding: 0.85rem;
+    background-color: var(--designeria-color-surface);
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.view-template-card:hover,
+.view-template-card:focus-visible {
+    border-color: var(--designeria-color-primary);
+    background-color: var(--designeria-color-surface-muted);
+}
+
+.view-template-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--designeria-color-primary-dark);
+}
+
+.view-template-description {
+    font-size: 0.82rem;
+    color: var(--designeria-color-text-muted);
+}
 
 .modal-overlay {
     position: fixed;

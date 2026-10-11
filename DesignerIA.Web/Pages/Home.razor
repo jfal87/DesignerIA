@@ -21,6 +21,7 @@
     <div class="workspace-content">
         <nav class="nav-rail">
             <RadzenButton Text="+ Nueva conversación" ButtonStyle="Radzen.ButtonStyle.Light" Click="@NuevaConversacion" Disabled="@_enviando" />
+            <RadzenButton Text="+ Nueva vista" ButtonStyle="Radzen.ButtonStyle.Light" Click="@AbrirNuevaVista" Disabled="@_preparandoVista" />
             <div class="nav-rail-placeholder">El historial de conversaciones estará disponible próximamente.</div>
 
             <div class="nav-rail-secondary">
@@ -189,6 +190,10 @@
                         {
                             <div class="viewspec-panel">
                                 <div class="viewspec-name">@(_vistaEnProgreso.Spec.Name ?? "(vista sin nombre)")</div>
+                                @if (!string.IsNullOrWhiteSpace(_vistaEnProgreso.Spec.ViewType))
+                                {
+                                    <div class="viewspec-summary-detail">Tipo de vista: @_vistaEnProgreso.Spec.ViewType</div>
+                                }
 
                                 @foreach (var estado in _vistaEnProgreso.Spec.States ?? Array.Empty<ViewSpecState>())
                                 {
@@ -202,11 +207,31 @@
                                         </div>
                                         @foreach (var fila in estado.Rows ?? Array.Empty<ViewSpecRow>())
                                         {
+                                            @if (!string.IsNullOrWhiteSpace(fila.Name))
+                                            {
+                                                <div class="viewspec-summary-detail">Fila: @fila.Name</div>
+                                            }
                                             @foreach (var area in fila.Areas ?? Array.Empty<ViewSpecArea>())
                                             {
                                                 <div class="viewspec-area">
                                                     <div class="viewspec-area-type">@(area.Type ?? "Área")</div>
-                                                    <div class="viewspec-area-detail">Stored Procedure: @(area.StoredProcedure ?? "pendiente")</div>
+                                                    @if (!string.IsNullOrWhiteSpace(area.Name))
+                                                    {
+                                                        <div class="viewspec-summary-detail">Área: @area.Name</div>
+                                                    }
+                                                    @if (!string.IsNullOrWhiteSpace(area.ObjectName))
+                                                    {
+                                                        <div class="viewspec-summary-detail">Objeto: @area.ObjectName</div>
+                                                    }
+                                                    <div class="viewspec-area-detail viewspec-summary-detail">Stored Procedure: @(string.IsNullOrWhiteSpace(area.StoredProcedure) ? "pendiente" : area.StoredProcedure)</div>
+                                                    @if (!string.IsNullOrWhiteSpace(area.ConnectionAlias))
+                                                    {
+                                                        <div class="viewspec-summary-detail">Alias de conexión: @area.ConnectionAlias</div>
+                                                    }
+                                                    @if (!string.IsNullOrWhiteSpace(area.ConfigurationPreset))
+                                                    {
+                                                        <div class="viewspec-summary-detail">Preset de configuración: @area.ConfigurationPreset</div>
+                                                    }
                                                     @foreach (var handler in area.Handlers ?? Array.Empty<ViewSpecHandler>())
                                                     {
                                                         <div class="viewspec-handler">@(handler.Type ?? "Handler") → @(handler.TargetState ?? "pendiente")</div>
@@ -304,6 +329,57 @@
         </aside>
     </div>
 </div>
+
+@if (_mostrarNuevaVista)
+{
+    <div class="modal-overlay">
+        <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="nueva-vista-title">
+            <div class="modal-title" id="nueva-vista-title">@(_mostrarFormularioNuevaVista ? "Consulta con grilla" : "Nueva vista")</div>
+            <div class="modal-body">
+                @if (!_mostrarFormularioNuevaVista)
+                {
+                    <button type="button" class="view-template-card" @onclick="SeleccionarConsultaConGrilla">
+                        <span class="view-template-title">Consulta con grilla</span>
+                        <span class="view-template-description">Una grilla alimentada por un Stored Procedure.</span>
+                    </button>
+                }
+                else
+                {
+                    <label class="modal-label" for="nueva-vista-nombre">Nombre / IdVista</label>
+                    <input class="modal-input" id="nueva-vista-nombre" @bind="_nombreNuevaVista" disabled="@_preparandoVista" />
+
+                    <label class="modal-label" for="nueva-vista-descripcion">Descripción (opcional)</label>
+                    <textarea class="modal-textarea" id="nueva-vista-descripcion" rows="2" @bind="_descripcionNuevaVista" disabled="@_preparandoVista" aria-describedby="nueva-vista-descripcion-ayuda"></textarea>
+                    <RadzenText TextStyle="Radzen.Blazor.TextStyle.Caption" id="nueva-vista-descripcion-ayuda">Si la dejas vacía, se usará el nombre.</RadzenText>
+
+                    <label class="modal-label" for="nueva-vista-sp">Stored Procedure</label>
+                    <input class="modal-input" id="nueva-vista-sp" @bind="_storedProcedureNuevaVista" disabled="@_preparandoVista" />
+
+                    <label class="modal-label" for="nueva-vista-alias">Alias de conexión</label>
+                    <input class="modal-input" id="nueva-vista-alias" @bind="_aliasConexionNuevaVista" disabled="@_preparandoVista" />
+
+                    @if (!string.IsNullOrWhiteSpace(_mensajeNuevaVista))
+                    {
+                        <div class="modal-message" role="status">@_mensajeNuevaVista</div>
+                    }
+                }
+            </div>
+            <div class="modal-actions">
+                @if (_mostrarFormularioNuevaVista)
+                {
+                    <button type="button" class="modal-button-secondary" disabled="@_preparandoVista" @onclick="VolverGaleriaVistas">Volver</button>
+                }
+                <button type="button" class="modal-button-secondary" disabled="@_preparandoVista" @onclick="CerrarNuevaVista">Cerrar</button>
+                @if (_mostrarFormularioNuevaVista)
+                {
+                    <button type="button" class="modal-button-primary" disabled="@_preparandoVista" @onclick="PrepararVistaAsync">
+                        @(_preparandoVista ? "Preparando..." : "Preparar vista")
+                    </button>
+                }
+            </div>
+        </div>
+    </div>
+}
 
 @if (_mostrarFormularioEnsenar)
 {
@@ -411,6 +487,15 @@
     // petición de creación de vista dentro de la misma página reemplaza la actual.
     private ViewSpecResult? _vistaEnProgreso;
 
+    private bool _mostrarNuevaVista;
+    private bool _mostrarFormularioNuevaVista;
+    private bool _preparandoVista;
+    private string _nombreNuevaVista = string.Empty;
+    private string _descripcionNuevaVista = string.Empty;
+    private string _storedProcedureNuevaVista = "dbo.PRC_GET_GRID_TEST_SORT_COLUMN";
+    private string _aliasConexionNuevaVista = "GestionEngine";
+    private string? _mensajeNuevaVista;
+
     // ---- ViewScriptGen: generación determinística de SQL de sólo previsualización ----
     private bool _generandoScript;
     private ViewScriptGenerationResult? _resultadoScript;
@@ -499,19 +584,27 @@
             return;
         }
 
+        var vista = _vistaEnProgreso;
         _generandoScript = true;
         _resultadoScript = null;
         try
         {
-            var respuesta = await Http.PostAsJsonAsync("api/view-script/generate", _vistaEnProgreso.Spec);
+            var respuesta = await Http.PostAsJsonAsync("api/view-script/generate", vista.Spec);
             if (respuesta.IsSuccessStatusCode)
             {
-                _resultadoScript = await respuesta.Content.ReadFromJsonAsync<ViewScriptGenerationResult>();
+                var resultado = await respuesta.Content.ReadFromJsonAsync<ViewScriptGenerationResult>();
+                if (ReferenceEquals(_vistaEnProgreso, vista))
+                {
+                    _resultadoScript = resultado;
+                }
             }
         }
         catch
         {
-            _resultadoScript = null;
+            if (ReferenceEquals(_vistaEnProgreso, vista))
+            {
+                _resultadoScript = null;
+            }
         }
         finally
         {
@@ -582,6 +675,7 @@
         _mensajeActual = string.Empty;
         _ultimoResultadoChat = null;
         _vistaEnProgreso = null;
+        _resultadoScript = null;
     }
 
     private Task EnviarStarterAsync(string texto)
@@ -630,6 +724,7 @@
                 if (resultado.ViewSpecResult is not null)
                 {
                     _vistaEnProgreso = resultado.ViewSpecResult;
+                    _resultadoScript = null;
                 }
             }
             else
@@ -674,6 +769,80 @@
         finally
         {
             _actualizandoConocimiento = false;
+        }
+    }
+
+    private void AbrirNuevaVista()
+    {
+        _nombreNuevaVista = string.Empty;
+        _descripcionNuevaVista = string.Empty;
+        _storedProcedureNuevaVista = "dbo.PRC_GET_GRID_TEST_SORT_COLUMN";
+        _aliasConexionNuevaVista = "GestionEngine";
+        _mensajeNuevaVista = null;
+        _mostrarFormularioNuevaVista = false;
+        _mostrarNuevaVista = true;
+    }
+
+    private void SeleccionarConsultaConGrilla()
+    {
+        _mostrarFormularioNuevaVista = true;
+    }
+
+    private void VolverGaleriaVistas()
+    {
+        _mensajeNuevaVista = null;
+        _mostrarFormularioNuevaVista = false;
+    }
+
+    private void CerrarNuevaVista()
+    {
+        _mostrarNuevaVista = false;
+    }
+
+    private async Task PrepararVistaAsync()
+    {
+        if (_preparandoVista)
+        {
+            return;
+        }
+
+        _preparandoVista = true;
+        _mensajeNuevaVista = null;
+        try
+        {
+            var request = new GridQueryTemplateRequest(
+                _nombreNuevaVista,
+                _descripcionNuevaVista,
+                _storedProcedureNuevaVista,
+                _aliasConexionNuevaVista);
+
+            var respuesta = await Http.PostAsJsonAsync("api/view-templates/grid-query", request);
+            if (respuesta.IsSuccessStatusCode)
+            {
+                var resultado = await respuesta.Content.ReadFromJsonAsync<ViewSpecResult>();
+                if (resultado is not null)
+                {
+                    _vistaEnProgreso = resultado;
+                    _resultadoScript = null;
+                    _mostrarNuevaVista = false;
+                }
+                else
+                {
+                    _mensajeNuevaVista = "No se pudo preparar la vista. Intenta nuevamente.";
+                }
+            }
+            else
+            {
+                _mensajeNuevaVista = "No se pudo preparar la vista. Intenta nuevamente.";
+            }
+        }
+        catch
+        {
+            _mensajeNuevaVista = "No se pudo contactar a la Api.";
+        }
+        finally
+        {
+            _preparandoVista = false;
         }
     }
 
