@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "1.0",
+  "view": { "id": "vDemoGrilla02", "type": "go" },
+  "states": [
+    {
+      "rows": [
+        {
+          "areas": [
+            {
+              "titulo": "Ventas",
+              "object": {
+                "type": "grid",
+                "settings": { "Renglones": 100 },
+                "data": {
+                  "storedProcedure": "PRC_VENTAS",
+                  "parameters": [ { "name": "Anio" }, { "name": "Planta", "default": null } ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

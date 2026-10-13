@@ -1,0 +1,95 @@
+{
+  "schemaVersion": "1.0",
+  "view": {
+    "id": "vDesignerIA_v2",
+    "type": "go",
+    "js": "var contador = 0;\n\nfunction Inicializar() {\n    var indicador = document.getElementById(\"designeria-demo-js\");\n    if (!indicador) {\n        indicador = document.createElement(\"div\");\n        indicador.id = \"designeria-demo-js\";\n        indicador.style.cssText = \"position:fixed;bottom:18px;right:18px;z-index:10000;padding:10px 16px;background:#e8f4ed;color:#236b3d;border:1px solid #b7d9c4;border-radius:6px;font:14px Arial;\";\n        document.body.appendChild(indicador);\n    }\n    indicador.textContent = \"DesignerIA | JS activo | Clics: \" + contador;\n}\n\nfunction clickEnWC(tipoObjeto, nombre, valor) {\n    contador += 1;\n    Inicializar();\n}\n\nif (document.readyState === \"loading\") {\n    document.addEventListener(\"DOMContentLoaded\", Inicializar);\n} else {\n    Inicializar();\n}\n",
+    "description": "Demo DesignerIA: navegacion y JavaScript",
+    "usesSecurity": false
+  },
+  "controls": [
+    {
+      "name": "wcIrDetalle",
+      "type": "buttonList",
+      "items": [
+        {
+          "text": "Ir a detalle",
+          "value": "detalle"
+        }
+      ],
+      "actions": [
+        {
+          "name": "cambiarEstado",
+          "parameters": [
+            "Detalle"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "wcVolver",
+      "type": "buttonList",
+      "items": [
+        {
+          "text": "Volver",
+          "value": "volver"
+        }
+      ],
+      "actions": [
+        {
+          "name": "cambiarEstado",
+          "parameters": [
+            "Principal"
+          ]
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "Principal",
+      "isDefault": true,
+      "controls": [
+        "wcIrDetalle"
+      ],
+      "rows": [
+        {
+          "areas": [
+            {
+              "name": "AreaPrincipal",
+              "object": {
+                "type": "grid",
+                "data": {
+                  "connection": "GestionEngine",
+                  "storedProcedure": "dbo.PRC_GET_GRID_TEST_SORT_COLUMN"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Detalle",
+      "controls": [
+        "wcVolver"
+      ],
+      "rows": [
+        {
+          "areas": [
+            {
+              "name": "AreaDetalle",
+              "object": {
+                "type": "grid",
+                "data": {
+                  "connection": "GestionEngine",
+                  "storedProcedure": "dbo.PRC_GET_GRID_TEST_SORT_COLUMN"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

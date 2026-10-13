@@ -41,31 +41,39 @@ public class StringConnectionCatalogService
         _logger = logger;
     }
 
+    public async Task<IReadOnlyList<StringConnectionCatalogEntry>> ReadByAliasAsync(
+        string alias, CancellationToken cancellationToken = default)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        using var connection = new SqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT TOP (2) IdStringConnection, isOracle FROM dbo.StringsConnection WHERE StringConnection = @alias";
+        command.Parameters.AddWithValue("@alias", alias);
+        using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var rows = new List<StringConnectionCatalogEntry>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            rows.Add(new(reader.GetInt32(0), reader.IsDBNull(1) ? null : reader.GetInt32(1)));
+        }
+        _logger.LogInformation(
+            "StringsConnection alias lookup completed in {ElapsedMs} ms. Alias: {Alias}. RowCount: {RowCount}",
+            stopwatch.ElapsedMilliseconds, alias, rows.Count);
+        return rows;
+    }
+
     /// <summary>
-    /// Resuelve el ID físico (IdStringConnection) correspondiente a un alias
-    /// lógico (StringConnection). Devuelve null si el alias no existe en el
-    /// catálogo del ambiente local. Sólo lectura (SELECT parametrizado).
+    /// Resuelve únicamente un alias único de SQL Server. Como GestionEngine, trata
+    /// isOracle NULL como cero; cualquier otro valor distinto de cero se rechaza.
+    /// Devuelve null si el alias no existe, es ambiguo o corresponde a Oracle.
     /// </summary>
     public async Task<int?> ResolveIdByAliasAsync(string alias, CancellationToken cancellationToken = default)
     {
-        var stopwatch = Stopwatch.StartNew();
-
-        using var connection = new SqlConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
-
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT IdStringConnection FROM dbo.StringsConnection WHERE StringConnection = @alias";
-        command.Parameters.AddWithValue("@alias", alias);
-
-        var result = await command.ExecuteScalarAsync(cancellationToken);
-
-        stopwatch.Stop();
-        _logger.LogInformation(
-            "StringsConnection alias lookup completed in {ElapsedMs} ms. Alias: {Alias}, Found: {Found}",
-            stopwatch.ElapsedMilliseconds,
-            alias,
-            result is not null);
-
-        return result is null or DBNull ? null : Convert.ToInt32(result);
+        var rows = await ReadByAliasAsync(alias, cancellationToken);
+        return rows.Count == 1 && IsSqlServer(rows[0].IsOracle) ? rows[0].Id : null;
     }
+
+    internal static bool IsSqlServer(int? isOracle) => (isOracle ?? 0) == 0;
 }
+
+public record StringConnectionCatalogEntry(int Id, int? IsOracle);

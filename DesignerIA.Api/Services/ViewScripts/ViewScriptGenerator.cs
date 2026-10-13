@@ -5,101 +5,327 @@ using DesignerIA.Contracts;
 namespace DesignerIA.Api.Services.ViewScripts;
 
 /// <summary>
-/// Genera texto SQL determinístico para el plan físico mínimo de V1. El script
-/// se devuelve como artefacto; este servicio nunca lo ejecuta. Copilot no genera
-/// SQL y todos los valores textuales pasan por <see cref="SqlLiteralEscaper"/>.
+/// Genera texto SQL determinístico para una vista vacía o con una grilla, con sus
+/// parámetros de valor fijo si los declara, mediante una única entrada que
+/// normaliza y valida el ViewSpec y exige su preflight.
+/// El script se devuelve como artefacto; este servicio nunca lo ejecuta. Copilot
+/// no genera SQL y todos los valores textuales pasan por <see cref="SqlLiteralEscaper"/>.
 /// </summary>
 public static class ViewScriptGenerator
 {
     public static ViewScriptGenerationResult Generate(
-        ViewSpec spec,
-        ViewSpecValidationResult viewSpecValidation,
-        string? auditUser)
+        ViewSpec spec, ViewCreationPreflightResult? preflight, string? auditUser)
     {
-        _ = viewSpecValidation;
         var normalizedSpec = ViewSpecNormalizer.Normalize(spec);
         var validation = ViewSpecValidator.Validate(normalizedSpec);
         var summary = BuildSummary(normalizedSpec);
         var gaps = ViewScriptGenerationValidator.Validate(normalizedSpec, validation).ToList();
-
         if (string.IsNullOrWhiteSpace(auditUser))
         {
-            gaps.Add(new ViewScriptGenerationGap(
-                "AuditUser no disponible",
-                "No se puede generar el script hasta recibir la identidad autenticada de la request (HttpContext.User.Identity.Name)."));
+            gaps.Add(new("AuditUser no disponible", "No se puede generar el script hasta recibir la identidad autenticada de la request (HttpContext.User.Identity.Name)."));
         }
-
+        if (gaps.Count == 0)
+        {
+            ValidatePreflight(normalizedSpec, preflight, gaps);
+        }
         return gaps.Count > 0
-            ? new ViewScriptGenerationResult(false, null, gaps, summary)
-            : Generate(ViewCreationPlanFactory.Create(normalizedSpec), summary, auditUser!);
+            ? new(false, null, gaps, summary, preflight)
+            : new(true, BuildScript(ViewCreationPlanFactory.Create(normalizedSpec, preflight!), auditUser!), [], summary, preflight);
     }
 
-    public static ViewScriptGenerationResult Generate(
-        ViewCreationPlan plan,
-        ViewScriptGenerationSummary summary,
-        string? auditUser)
+    private static void ValidatePreflight(ViewSpec spec, ViewCreationPreflightResult? preflight,
+        List<ViewScriptGenerationGap> gaps)
     {
-        if (string.IsNullOrWhiteSpace(auditUser))
+        if (preflight is null || preflight.ViewName != spec.Name)
         {
-            return new ViewScriptGenerationResult(
-                false,
-                null,
-                [new ViewScriptGenerationGap(
-                    "AuditUser no disponible",
-                    "No se puede generar el script hasta recibir la identidad autenticada de la request (HttpContext.User.Identity.Name).")],
-                summary);
+            gaps.Add(new("Preflight incompleto", "Se requiere el preflight de esta vista antes de generar el script."));
+            return;
         }
-
-        return new ViewScriptGenerationResult(true, BuildScript(plan, auditUser), [], summary);
+        if (preflight.Gaps is { Count: > 0 })
+        {
+            gaps.AddRange(preflight.Gaps);
+            return;
+        }
+        if (!preflight.IsAvailable || preflight.ExistingViewId is not null)
+        {
+            gaps.Add(new("Nombre de vista existente", "Ya existe una vista con el nombre indicado; no se generó un script que pueda sobrescribirla."));
+            return;
+        }
+        if (spec.ViewType != "go")
+        {
+            return;
+        }
+        var area = spec.States![0].Rows![0].Areas![0];
+        var canonical = preflight.CanonicalStoredProcedure;
+        var validCanonical = canonical is not null && canonical.Length <= 250 &&
+            ViewScriptGenerationValidator.TryParseStoredProcedure(canonical, out var schema, out var name) &&
+            canonical == $"[{schema}].[{name}]" &&
+            ViewScriptGenerationValidator.TryParseStoredProcedure(area.StoredProcedure, out var requestedSchema, out var requestedName) &&
+            string.Equals(schema, requestedSchema, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(name, requestedName, StringComparison.OrdinalIgnoreCase);
+        if (preflight.Gaps is null || !Enumerable.Range(1, 6).All(check => preflight.CompletedChecks?.Contains(check) == true) || !validCanonical)
+        {
+            gaps.Add(new("Preflight incompleto", "La grilla requiere las seis comprobaciones superadas y el SP canónico resuelto."));
+            return;
+        }
+        var requested = area.Parameters ?? [];
+        var resolved = preflight.Parameters ?? [];
+        if (requested.Count != resolved.Count || requested.Any(parameter =>
+            !ViewScriptGenerationValidator.TryParseParameterName(parameter.Name, out var parameterName) ||
+            !resolved.Any(item => string.Equals(item.Name, parameterName, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(item.DefaultValue, parameter.DefaultValue, StringComparison.Ordinal))))
+        {
+            gaps.Add(new("Preflight incompleto", "Los parámetros resueltos por el preflight no corresponden a los parámetros con valor fijo del ViewSpec."));
+        }
     }
 
-    private static string BuildScript(ViewCreationPlan plan, string auditUser)
+    /// <summary>
+    /// Texto SQL del plan. Es la única generación: la usan las rutas por ViewSpec y
+    /// la entrada por documento. El script nunca se ejecuta aquí.
+    /// </summary>
+    internal static string BuildScript(ViewCreationPlan plan, string auditUser)
     {
-        var viewName = SqlLiteralEscaper.EscapeLiteral(plan.View.Name);
-        var description = SqlLiteralEscaper.EscapeLiteral(plan.View.Description);
-        var stateName = SqlLiteralEscaper.EscapeLiteral(plan.State.Name);
-        var escapedAuditUser = SqlLiteralEscaper.EscapeLiteral(auditUser);
-        var configuration = SqlLiteralEscaper.EscapeLiteral(plan.StateConfiguration.Configuration);
-        var rowName = SqlLiteralEscaper.EscapeLiteral(plan.Row.Name);
+        var blocks = plan.StateBlocks;
+        var controls = plan.Controls ?? [];
+        var firstGrid = blocks.Select(block => block.Grid).FirstOrDefault(grid => grid is not null);
+        var viewName = SqlLiteralEscaper.Literal(plan.View.Name);
+        var description = SqlLiteralEscaper.Literal(plan.View.Description);
+        var user = SqlLiteralEscaper.Literal(auditUser);
+        var viewType = SqlLiteralEscaper.Literal(plan.View.ViewType);
         var script = new StringBuilder();
-
-        script.AppendLine("SET NOCOUNT ON;");
-        script.AppendLine();
-        script.AppendLine("IF EXISTS (SELECT 1 FROM dbo.Vistas WHERE IdVista = '" + viewName + "' OR Nombre = '" + viewName + "')");
+        script.AppendLine("IF @@TRANCOUNT <> 0");
         script.AppendLine("BEGIN");
-        script.AppendLine("    RAISERROR('La vista ya existe; el script no realiza cambios.', 16, 1);");
+        script.AppendLine("    RAISERROR(N'El script requiere una sesión sin transacción abierta.', 16, 1);");
         script.AppendLine("    RETURN;");
         script.AppendLine("END");
         script.AppendLine();
+        script.AppendLine("SET NOCOUNT ON;");
+        script.AppendLine("SET XACT_ABORT ON;");
+        script.AppendLine("SET LOCK_TIMEOUT 5000;");
+        script.AppendLine();
         script.AppendLine("BEGIN TRY");
         script.AppendLine("    BEGIN TRANSACTION;");
-        script.AppendLine("    DECLARE @IDX_Estado int;");
-        script.AppendLine("    SELECT @IDX_Estado = ISNULL(MAX(IdEstado), 1) FROM dbo.Estados;");
-        script.AppendLine("    DECLARE @IDX_Fila int;");
-        script.AppendLine("    SELECT @IDX_Fila = ISNULL(MAX(IdFila), 1) FROM dbo.Filas;");
+        script.AppendLine();
+        script.AppendLine("    IF EXISTS (SELECT 1 FROM dbo.Vistas WITH (UPDLOCK, HOLDLOCK)");
+        script.AppendLine($"               WHERE IdVista = {viewName} OR Nombre = {viewName})");
+        script.AppendLine("        RAISERROR(N'La vista ya existe; el script no realiza cambios.', 16, 1);");
+        script.AppendLine();
+        if (firstGrid is not null)
+        {
+            script.AppendLine("    DECLARE @IdStringConnection int, @AliasCount int;");
+            AppendAliasResolution(script, firstGrid);
+            script.AppendLine();
+            script.AppendLine("    DECLARE @IDX_Estado int, @IDX_Fila int, @IDX_Area int, @IDX_ExtraccionDato int,");
+            script.AppendLine("            @IDX_StoredProcedure int, @IDX_ObjetoArea int, @IDX_ObjetoAreaConfig int, @IDX_LeftMenu int;");
+        }
+        else
+        {
+            script.AppendLine("    DECLARE @IDX_Estado int;");
+            script.AppendLine("    SELECT @IDX_Estado = ISNULL(MAX(IdEstado), 1) FROM dbo.Estados WITH (UPDLOCK, HOLDLOCK);");
+            script.AppendLine("    DECLARE @IDX_Fila int;");
+            script.AppendLine("    SELECT @IDX_Fila = ISNULL(MAX(IdFila), 1) FROM dbo.Filas WITH (UPDLOCK, HOLDLOCK);");
+        }
+        if (firstGrid is not null)
+        {
+            AppendId(script, "Estado", "IdEstado", "Estados");
+            AppendId(script, "Fila", "IdFila", "Filas");
+            AppendId(script, "Area", "IdArea", "Areas");
+            AppendId(script, "ExtraccionDato", "IdExtraccionDato", "ExtraccionesDatos");
+            AppendId(script, "StoredProcedure", "IdStoredProcedure", "StoredProcedure");
+            AppendId(script, "ObjetoArea", "IdObjetoDeArea", "ObjetosDeArea");
+            AppendId(script, "ObjetoAreaConfig", "Id", "ConfiguracionesObjetoDeArea");
+            AppendId(script, "LeftMenu", "IdLeftMenu", "LeftMenus");
+            if (blocks.Any(block => block.Grid?.Parameters is { Count: > 0 }))
+            {
+                script.AppendLine("    DECLARE @IDX_SPParam int, @IDX_SPParamBinding int;");
+                AppendId(script, "SPParam", "IdParametroSP", "ParametrosSP");
+                AppendId(script, "SPParamBinding", "IdMapeoParametro", "MapeoParametros");
+            }
+        }
+        if (controls.Count > 0)
+        {
+            script.AppendLine("    DECLARE @IDX_WebControl int, @IDX_WebControlItem int;");
+            AppendId(script, "WebControl", "IdWebControl", "WebControls");
+            AppendId(script, "WebControlItem", "IdItemWebControl", "ItemsWebControl");
+            // El Id del tipo es un valor del catálogo: se comprueba que en esta base significa lo mismo.
+            foreach (var type in controls.Select(control => (control.TypeId, control.TypeName)).Distinct())
+            {
+                script.AppendLine($"    IF NOT EXISTS (SELECT 1 FROM dbo.TiposWebControl WHERE IdTipoWebControl = {type.TypeId} AND Tipo = {SqlLiteralEscaper.Literal(type.TypeName)})");
+                script.AppendLine("        RAISERROR(N'El catálogo de tipos de web control de esta base no es el esperado.', 16, 5);");
+            }
+        }
         script.AppendLine();
         script.AppendLine("    INSERT INTO dbo.Vistas (IdOwner, IdHistoricoCambio, Nombre, Descripcion, FechaCreacion, VersionActual, ArchivoJs, IdVista, TipoVista, UsaSeguridad, User_Create, User_Update, F_Create, F_Update, IdStringsConnectionMyVision, JsCode, Frente, VistaVersionado)");
-        script.AppendLine("    VALUES (1, 1, '" + viewName + "', '" + description + "', GETDATE(), '1.0', '', '" + viewName + "', 'site', 0, '" + escapedAuditUser + "', NULL, GETDATE(), NULL, NULL, '', '', '1.0');");
+        script.AppendLine($"    VALUES (1, 1, {viewName}, {description}, GETDATE(), N'1.0', N'', {viewName}, {viewType}, 0, {user}, NULL, GETDATE(), NULL, NULL, {SqlLiteralEscaper.Literal(plan.View.JsCode)}, N'', N'1.0');");
         script.AppendLine();
-        script.AppendLine("    SET @IDX_Estado = @IDX_Estado + 1;");
-        script.AppendLine("    INSERT INTO dbo.Estados (IdEstado, [Default], Descripcion, IdVista, ArchivoJs, LeftMenuFijo, User_Create, User_Update, F_Create, F_Update)");
-        script.AppendLine("    VALUES (@IDX_Estado, 1, '" + stateName + "', '" + viewName + "', '', 0, '" + escapedAuditUser + "', NULL, GETDATE(), NULL);");
+
+        // Con grillas, cada Id parte de MAX + 1 y avanza antes de cada registro posterior al primero.
+        // Sin grillas se conserva la forma de la vista vacía: se avanza antes de cada registro.
+        var written = new WrittenRows();
+        for (var index = 0; index < blocks.Count; index++)
+        {
+            var block = blocks[index];
+            if (firstGrid is null || index > 0)
+            {
+                script.AppendLine("    SET @IDX_Estado = @IDX_Estado + 1;");
+            }
+            script.AppendLine("    INSERT INTO dbo.Estados (IdEstado, [Default], Descripcion, IdVista, ArchivoJs, LeftMenuFijo, User_Create, User_Update, F_Create, F_Update)");
+            script.AppendLine($"    VALUES (@IDX_Estado, {(block.State.IsDefault ? 1 : 0)}, {SqlLiteralEscaper.Literal(block.State.Name)}, {viewName}, N'', 0, {user}, NULL, GETDATE(), NULL);");
+            script.AppendLine();
+            if (firstGrid is null || index > 0)
+            {
+                script.AppendLine("    SET @IDX_Fila = @IDX_Fila + 1;");
+            }
+            script.AppendLine("    INSERT INTO dbo.Filas (IdFila, IdEstado, Nombre, Ancho, Altura, User_Create, User_Update, F_Create, F_Update)");
+            script.AppendLine($"    VALUES (@IDX_Fila, @IDX_Estado, {SqlLiteralEscaper.Literal(block.Row.Name)}, {block.Row.Width}, {block.Row.Height}, {user}, NULL, GETDATE(), NULL);");
+            script.AppendLine();
+            if (block.Grid is { } grid)
+            {
+                if (written.Grids > 0)
+                {
+                    AppendAliasResolution(script, grid);
+                    script.AppendLine();
+                    foreach (var variable in new[] { "Area", "ExtraccionDato", "StoredProcedure", "ObjetoArea", "ObjetoAreaConfig" })
+                    {
+                        script.AppendLine($"    SET @IDX_{variable} = @IDX_{variable} + 1;");
+                    }
+                }
+                AppendGridInserts(script, grid, user, written);
+            }
+            // Los web controls son de la vista y se escriben una sola vez, en el estado inicial.
+            if (block.State.IsDefault)
+            {
+                AppendControlInserts(script, controls, user);
+            }
+            script.AppendLine("    INSERT INTO dbo.ConfiguracionesEstados (IdEstado, Configuracion, User_Create, F_Update)");
+            script.AppendLine($"    VALUES (@IDX_Estado, {SqlLiteralEscaper.Literal(block.StateConfiguration.Configuration)}, {user}, GETDATE());");
+            script.AppendLine();
+        }
+        script.AppendLine("    IF (SELECT COUNT(*) FROM dbo.Filas WHERE IdFila = @IDX_Fila) <> 1");
+        script.AppendLine("        RAISERROR(N'IdFila duplicado; no se realizan cambios.', 16, 3);");
+        script.AppendLine($"    IF (SELECT COUNT(*) FROM dbo.Vistas WHERE IdVista = {viewName} OR Nombre = {viewName}) <> 1");
+        script.AppendLine("        RAISERROR(N'Nombre o IdVista duplicado; no se realizan cambios.', 16, 4);");
         script.AppendLine();
-        script.AppendLine("    SET @IDX_Fila = @IDX_Fila + 1;");
-        script.AppendLine("    INSERT INTO dbo.Filas (IdFila, IdEstado, Nombre, Ancho, Altura, User_Create, User_Update, F_Create, F_Update)");
-        script.AppendLine("    VALUES (@IDX_Fila, @IDX_Estado, '" + rowName + "', " + plan.Row.Width + ", " + plan.Row.Height + ", '" + escapedAuditUser + "', NULL, GETDATE(), NULL);");
-        script.AppendLine();
-        script.AppendLine("    INSERT INTO dbo.ConfiguracionesEstados (IdEstado, Configuracion, User_Create, F_Update)");
-        script.AppendLine("    VALUES (@IDX_Estado, '" + configuration + "', '" + escapedAuditUser + "', GETDATE());");
         script.AppendLine("    COMMIT TRANSACTION;");
         script.AppendLine("END TRY");
         script.AppendLine("BEGIN CATCH");
         script.AppendLine("    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;");
-        script.AppendLine("    DECLARE @ErrorMessage nvarchar(4000);");
-        script.AppendLine("    SET @ErrorMessage = ERROR_MESSAGE();");
-        script.AppendLine("    RAISERROR('%s', 16, 1, @ErrorMessage);");
+        script.AppendLine("    DECLARE @ErrorNumber int, @ErrorState int, @ErrorMessage nvarchar(2048);");
+        script.AppendLine("    SELECT @ErrorNumber = ERROR_NUMBER(), @ErrorState = ERROR_STATE(), @ErrorMessage = ERROR_MESSAGE();");
+        script.AppendLine("    RAISERROR(N'[%d/%d] %s', 16, 1, @ErrorNumber, @ErrorState, @ErrorMessage);");
         script.AppendLine("END CATCH");
+        script.AppendLine();
+        script.AppendLine("SET LOCK_TIMEOUT -1;");
+        script.AppendLine("SET XACT_ABORT OFF;");
         return script.ToString();
+    }
+
+    /// <summary>Registros ya escritos de las tablas cuyo Id avanza de un estado a otro.</summary>
+    private sealed class WrittenRows
+    {
+        public int Grids { get; set; }
+        public int LeftMenus { get; set; }
+        public int Parameters { get; set; }
+        public int ParameterBindings { get; set; }
+    }
+
+    private static void AppendId(StringBuilder script, string variable, string column, string table) =>
+        script.AppendLine($"    SELECT @IDX_{variable} = ISNULL(MAX({column}), 1) + 1 FROM dbo.{table} WITH (UPDLOCK, HOLDLOCK);");
+
+    private static void AppendAliasResolution(StringBuilder script, ViewCreationPlanGrid grid)
+    {
+        script.AppendLine("    SELECT @AliasCount = COUNT(*), @IdStringConnection = MIN(IdStringConnection)");
+        script.AppendLine($"    FROM dbo.StringsConnection WHERE StringConnection = {SqlLiteralEscaper.Literal(grid.ConnectionAlias)};");
+        script.AppendLine("    IF @AliasCount <> 1");
+        script.AppendLine("        RAISERROR(N'El alias de conexión no existe o es ambiguo en esta base.', 16, 2);");
+    }
+
+    private static void AppendGridInserts(StringBuilder script, ViewCreationPlanGrid grid, string user, WrittenRows written)
+    {
+        var area = SqlLiteralEscaper.Literal(grid.AreaName);
+        var procedure = SqlLiteralEscaper.Literal(grid.CanonicalStoredProcedure);
+        var ansiProcedure = SqlLiteralEscaper.Literal(grid.CanonicalStoredProcedure, unicode: false);
+        var objectName = SqlLiteralEscaper.Literal(grid.ObjectName);
+        var configuration = SqlLiteralEscaper.Literal(grid.Configuration);
+        script.AppendLine("    INSERT INTO dbo.Areas (IdArea, IdFila, Nombre, Ancho, Altura, User_Create, User_Update, F_Create, F_Update)");
+        script.AppendLine($"    VALUES (@IDX_Area, @IDX_Fila, {area}, 0, 0, {user}, NULL, GETDATE(), NULL);");
+        script.AppendLine();
+        script.AppendLine("    INSERT INTO dbo.ExtraccionesDatos (IdExtraccionDato, Descripcion, User_Create, User_Update, F_Create, F_Update)");
+        script.AppendLine($"    VALUES (@IDX_ExtraccionDato, {procedure}, {user}, NULL, GETDATE(), NULL);");
+        script.AppendLine();
+        script.AppendLine("    INSERT INTO dbo.StoredProcedure (IdStoredProcedure, Nombre, Descripcion, OrdenEjecucion, IdStringConnection, IdExtraccionDato, IdTipoEjecucionSP, User_Create, User_Update, F_Create, F_Update)");
+        script.AppendLine($"    VALUES (@IDX_StoredProcedure, {ansiProcedure}, N'', 0, @IdStringConnection, @IDX_ExtraccionDato, 1, {user}, NULL, GETDATE(), NULL);");
+        script.AppendLine();
+        // Valores fijos, como los escribe Designer: todos los ParametrosSP y después sus
+        // MapeoParametros, sin fuente (Variable y VariableRequest vacías, nunca NULL).
+        var parameters = grid.Parameters ?? [];
+        foreach (var parameter in parameters)
+        {
+            if (written.Parameters++ > 0)
+            {
+                script.AppendLine("    SET @IDX_SPParam = @IDX_SPParam + 1;");
+            }
+            script.AppendLine("    INSERT INTO dbo.ParametrosSP (IdParametroSP, IdStoredProcedure, Nombre, UsaComillas, EsMyVision, User_Create, User_Update, F_Create, F_Update, TipoParametro)");
+            script.AppendLine($"    VALUES (@IDX_SPParam, @IDX_StoredProcedure, {SqlLiteralEscaper.Literal(parameter.Name)}, {(parameter.UsesQuotes ? 1 : 0)}, 0, {user}, NULL, GETDATE(), NULL, {SqlLiteralEscaper.Literal(parameter.Type, unicode: false)});");
+            script.AppendLine();
+        }
+        foreach (var parameter in parameters)
+        {
+            if (written.ParameterBindings++ > 0)
+            {
+                script.AppendLine("    SET @IDX_SPParamBinding = @IDX_SPParamBinding + 1;");
+            }
+            script.AppendLine("    INSERT INTO dbo.MapeoParametros (IdMapeoParametro, IdEstado, NombreArea, Parametro, Variable, ValorDefault, IdStoredProcedure, VariableRequest, User_Create, User_Update, F_Create, F_Update)");
+            script.AppendLine($"    VALUES (@IDX_SPParamBinding, @IDX_Estado, {area}, {SqlLiteralEscaper.Literal(parameter.Name)}, N'', {SqlLiteralEscaper.Literal(parameter.DefaultValue)}, @IDX_StoredProcedure, N'', {user}, NULL, GETDATE(), NULL);");
+            script.AppendLine();
+        }
+        script.AppendLine("    INSERT INTO dbo.ObjetosDeArea (IdObjetoDeArea, IdArea, IdExtraccionDato, IdTipoObjetoDeArea, Nombre, UsaPaginador, User_Create, User_Update, F_Create, F_Update)");
+        script.AppendLine($"    VALUES (@IDX_ObjetoArea, @IDX_Area, @IDX_ExtraccionDato, 2, {objectName}, 0, {user}, NULL, GETDATE(), NULL);");
+        script.AppendLine();
+        script.AppendLine("    INSERT INTO dbo.ConfiguracionesObjetoDeArea (Id, IdObjetoDeArea, Configuracion, User_Create, User_Update, F_Create, F_Update)");
+        script.AppendLine($"    VALUES (@IDX_ObjetoAreaConfig, @IDX_ObjetoArea, {configuration}, {user}, NULL, GETDATE(), NULL);");
+        script.AppendLine();
+        if (grid.LeftMenu is { } leftMenu)
+        {
+            if (written.LeftMenus++ > 0)
+            {
+                script.AppendLine("    SET @IDX_LeftMenu = @IDX_LeftMenu + 1;");
+            }
+            script.AppendLine("    INSERT INTO dbo.LeftMenus (IdLeftMenu, IdEstado, Nombre, User_Create, User_Update, F_Create, F_Update)");
+            script.AppendLine($"    VALUES (@IDX_LeftMenu, @IDX_Estado, {SqlLiteralEscaper.Literal(leftMenu)}, {user}, NULL, GETDATE(), NULL);");
+            script.AppendLine();
+        }
+        written.Grids++;
+    }
+
+    // Como Designer: el control, sus opciones fijas y su configuración de acciones. Sin extracción (-1).
+    private static void AppendControlInserts(StringBuilder script, IReadOnlyList<ViewCreationPlanControl> controls, string user)
+    {
+        var items = 0;
+        for (var index = 0; index < controls.Count; index++)
+        {
+            var control = controls[index];
+            if (index > 0)
+            {
+                script.AppendLine("    SET @IDX_WebControl = @IDX_WebControl + 1;");
+            }
+            script.AppendLine("    INSERT INTO dbo.WebControls (IdWebControl, IdTipoWebControl, IdEstado, IdExtraccionDato, Nombre, Titulo, ValoresComodin, Orden, User_Create, User_Update, F_Create, F_Update)");
+            script.AppendLine($"    VALUES (@IDX_WebControl, {control.TypeId}, @IDX_Estado, -1, {SqlLiteralEscaper.Literal(control.Name)}, N'', N'', {control.Order}, {user}, NULL, GETDATE(), NULL);");
+            script.AppendLine();
+            foreach (var item in control.Items)
+            {
+                if (items++ > 0)
+                {
+                    script.AppendLine("    SET @IDX_WebControlItem = @IDX_WebControlItem + 1;");
+                }
+                script.AppendLine("    INSERT INTO dbo.ItemsWebControl (IdItemWebControl, IdWebControl, ItemId, ItemDescripcion, ItemDefault, User_Create, User_Update, F_Create, F_Update)");
+                script.AppendLine($"    VALUES (@IDX_WebControlItem, @IDX_WebControl, {SqlLiteralEscaper.Literal(item.Value)}, {SqlLiteralEscaper.Literal(item.Text)}, {(item.IsDefault ? 1 : 0)}, {user}, NULL, GETDATE(), NULL);");
+                script.AppendLine();
+            }
+            script.AppendLine("    INSERT INTO dbo.ConfiguracionesFiltros (IdWebControl, Configuracion, User_Create, F_Update)");
+            script.AppendLine($"    VALUES (@IDX_WebControl, {SqlLiteralEscaper.Literal(control.Configuration)}, {user}, GETDATE());");
+            script.AppendLine();
+        }
     }
 
     private static ViewScriptGenerationSummary BuildSummary(ViewSpec spec)
@@ -108,6 +334,6 @@ public static class ViewScriptGenerator
         var rows = states.SelectMany(state => state.Rows ?? []).ToList();
         var areas = rows.SelectMany(row => row.Areas ?? []).ToList();
         var handlers = areas.SelectMany(area => area.Handlers ?? []).ToList();
-        return new ViewScriptGenerationSummary(1, states.Count, rows.Count, areas.Count, handlers.Count);
+        return new(1, states.Count, rows.Count, areas.Count, handlers.Count);
     }
 }

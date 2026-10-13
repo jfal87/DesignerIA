@@ -25,6 +25,6 @@ public static class ViewSpecNormalizer
             ? states[0].Name
             : spec.InitialState?.Trim();
 
-        return new ViewSpec(name, description, initialState, states);
+        return new ViewSpec(name, description, initialState, states, spec.ViewType);
     }
 }

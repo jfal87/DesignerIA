@@ -1,6 +1,7 @@
 using System.Text;
 using Microsoft.AspNetCore.Authentication.Negotiate;
 using DesignerIA.Api.Services;
+using DesignerIA.Api.Services.ViewDocuments;
 using DesignerIA.Api.Services.ViewScripts;
 using DesignerIA.Api.Services.CuratedKnowledge;
 using DesignerIA.Api.Services.Knowledge;
@@ -27,11 +28,18 @@ builder.Services
 builder.Services.AddOpenApi();
 
 builder.Services.AddScoped<GestionEngineHealthService>();
+builder.Services.AddScoped<HandlerExamplesService>();
+builder.Services.AddScoped<GestionEngineMetadataService>();
 builder.Services.AddScoped<StringConnectionCatalogService>();
 builder.Services.AddScoped<ViewCreationPreflightService>();
+builder.Services.AddScoped<ViewCreationService>();
+builder.Services.AddScoped<JsonMetadataService>();
 builder.Services.AddScoped<CopilotSmokeTestService>();
 builder.Services.AddScoped<CopilotMetadataTestService>();
+// Singleton: un único runtime del SDK por proceso; cada request crea y cierra su propia sesión.
+builder.Services.AddSingleton<CopilotClientProvider>();
 builder.Services.AddScoped<CopilotChatService>();
+builder.Services.AddSingleton<ConversationContextStore>();
 builder.Services.AddScoped<KnowledgeIndexService>();
 builder.Services.AddScoped<KnowledgeSearchService>();
 // Singleton: mantiene un único lock de archivo que serializa correctamente las

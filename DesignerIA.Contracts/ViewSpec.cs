@@ -19,7 +19,8 @@ public record ViewSpec(
     string? Name,
     string? Description,
     string? InitialState,
-    IReadOnlyList<ViewSpecState>? States);
+    IReadOnlyList<ViewSpecState>? States,
+    string? ViewType = null);
 
 /// <param name="Name">Nombre/clave del estado. Evidencia real (EngineUpdater.cs,
 /// CreateStates) confirma que dbo.Estados.Descripcion reutiliza siempre este mismo
@@ -30,7 +31,8 @@ public record ViewSpecState(
     IReadOnlyList<ViewSpecRow>? Rows);
 
 public record ViewSpecRow(
-    IReadOnlyList<ViewSpecArea>? Areas);
+    IReadOnlyList<ViewSpecArea>? Areas,
+    string? Name = null);
 
 /// <param name="StoredProcedure">Nombre del Stored Procedure real de SQL Server
 /// que alimenta esta área.</param>
@@ -39,11 +41,31 @@ public record ViewSpecRow(
 /// GestionEngine, por ejemplo "GestionEngine", "DW_TERNIUM"). NO es el ID
 /// numérico físico (IdStringConnection) ni la cadena de conexión física: esas
 /// pertenecen al ambiente/Motor, no al ViewSpec (ver AGENTS.md, sección 5.4.3).</param>
+/// <param name="Parameters">Parámetros del Stored Procedure con valor fijo. Nulo o
+/// vacío significa que la vista no declara parámetros. Si se informa, debe cubrir
+/// todos los parámetros de entrada del procedimiento: es una decisión de alcance
+/// de DesignerIA, no una regla de Motor.</param>
 public record ViewSpecArea(
     string? Type,
     string? StoredProcedure,
     string? ConnectionAlias,
-    IReadOnlyList<ViewSpecHandler>? Handlers);
+    IReadOnlyList<ViewSpecHandler>? Handlers,
+    string? Name = null,
+    string? ObjectName = null,
+    string? ConfigurationPreset = null,
+    IReadOnlyList<ViewSpecParameter>? Parameters = null);
+
+/// <summary>
+/// Parámetro del Stored Procedure con un valor fijo: un valor configurado sin
+/// fuente asociada (dbo.MapeoParametros.ValorDefault con Variable vacía). No
+/// describe tipos SQL ni IDs físicos, que se resuelven en la base destino.
+/// </summary>
+/// <param name="Name">Nombre del parámetro, con o sin «@» inicial.</param>
+/// <param name="DefaultValue">Texto del valor, tal como se capturó. Nulo significa
+/// «sin valor informado»; no representa un NULL de SQL.</param>
+public record ViewSpecParameter(
+    string? Name,
+    string? DefaultValue);
 
 public record ViewSpecHandler(
     string? Type,

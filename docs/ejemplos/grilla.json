@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1.0",
+  "view": { "id": "vDemoGrilla01", "type": "go" },
+  "states": [
+    {
+      "rows": [
+        {
+          "areas": [
+            {
+              "object": {
+                "type": "grid",
+                "data": {
+                  "connection": "GestionEngine",
+                  "storedProcedure": "dbo.PRC_GET_GRID_TEST_SORT_COLUMN"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
