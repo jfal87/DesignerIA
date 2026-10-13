@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Text.RegularExpressions;
 using DesignerIA.Contracts;
 using Microsoft.Data.SqlClient;
 
@@ -6,8 +8,9 @@ namespace DesignerIA.Api.Services.ViewScripts;
 
 /// <summary>
 /// Comprueba por lectura la disponibilidad del nombre y, para una grilla, el
-/// alias, la conexión configurada y los metadatos del procedimiento y su primer
-/// resultado. Devuelve rechazos y comprobaciones superadas; nunca ejecuta el SP.
+/// alias, la conexión configurada y los metadatos del procedimiento, sus
+/// parámetros y su primer resultado. Devuelve rechazos y comprobaciones
+/// superadas; nunca ejecuta el SP.
 /// </summary>
 public sealed class ViewCreationPreflightService
 {
@@ -46,23 +49,34 @@ public sealed class ViewCreationPreflightService
     {
         var result = await CheckNameAsync(spec.Name!, cancellationToken);
         var area = spec.States![0].Rows?.FirstOrDefault()?.Areas?.FirstOrDefault();
-        if (area is null)
-        {
-            return result;
-        }
+        return area is null
+            ? result
+            : await CheckGridAsync(result, area.ConnectionAlias!, area.StoredProcedure, area.Parameters, cancellationToken);
+    }
+
+    /// <summary>
+    /// Añade a <paramref name="result"/> las comprobaciones 2 a 6 de una grilla: alias,
+    /// conexión configurada, procedimiento, parámetros y primer resultado. Una vista con
+    /// varias grillas la invoca una vez por grilla.
+    /// </summary>
+    public async Task<ViewCreationPreflightResult> CheckGridAsync(ViewCreationPreflightResult result, string connectionAlias,
+        string? storedProcedure, IReadOnlyList<ViewSpecParameter>? requested, CancellationToken cancellationToken = default)
+    {
         var gaps = result.Gaps!.ToList();
         var completed = result.CompletedChecks!.ToList();
-        var aliasRows = await _catalog.ReadByAliasAsync(area.ConnectionAlias!, cancellationToken);
+        var aliasRows = await _catalog.ReadByAliasAsync(connectionAlias, cancellationToken);
         var aliasGap = FromAliasRows(aliasRows.Count, aliasRows.Count == 1 ? aliasRows[0].IsOracle : null);
         AddCheck(2, aliasGap, gaps, completed);
-        var connectionKey = _configuration[$"ConnectionAliases:{area.ConnectionAlias}"];
+        var connectionKey = _configuration[$"ConnectionAliases:{connectionAlias}"];
         var spConnection = string.IsNullOrWhiteSpace(connectionKey) ? null : _configuration.GetConnectionString(connectionKey);
         var configurationGap = FromConfiguredConnection(!string.IsNullOrWhiteSpace(spConnection));
         AddCheck(3, configurationGap, gaps, completed);
         string? canonical = null;
+        IReadOnlyList<ViewCreationPreflightParameter>? resolvedParameters = null;
+        IReadOnlyList<ViewCreationPreflightDeclaredParameter>? declaredParameters = null;
         if (aliasGap is null && configurationGap is null)
         {
-            ViewScriptGenerationValidator.TryParseStoredProcedure(area.StoredProcedure, out var schema, out var name);
+            ViewScriptGenerationValidator.TryParseStoredProcedure(storedProcedure, out var schema, out var name);
             await using var connection = new SqlConnection(spConnection);
             await connection.OpenAsync(cancellationToken);
             int? objectId = null;
@@ -89,15 +103,35 @@ public sealed class ViewCreationPreflightService
                 var parameters = new List<ViewProcedureParameter>();
                 await using (var command = connection.CreateCommand())
                 {
-                    command.CommandText = "SELECT name, is_output FROM sys.parameters WHERE object_id = @objectId AND parameter_id > 0 ORDER BY parameter_id";
+                    command.CommandText = "SELECT p.name, p.is_output, TYPE_NAME(p.system_type_id), p.max_length, CAST(ISNULL(t.is_table_type, 0) AS bit) FROM sys.parameters p LEFT JOIN sys.types t ON t.user_type_id = p.user_type_id WHERE p.object_id = @objectId AND p.parameter_id > 0 ORDER BY p.parameter_id";
                     command.Parameters.AddWithValue("@objectId", objectId.Value);
                     await using var reader = await command.ExecuteReaderAsync(cancellationToken);
                     while (await reader.ReadAsync(cancellationToken))
                     {
-                        parameters.Add(new(reader.GetString(0), reader.GetBoolean(1)));
+                        parameters.Add(new(reader.GetString(0), reader.GetBoolean(1),
+                            reader.IsDBNull(2) ? null : reader.GetString(2), reader.GetInt16(3), reader.GetBoolean(4)));
                     }
                 }
-                AddCheck(5, FromParameters(canonical!, parameters), gaps, completed);
+                declaredParameters = parameters
+                    .Select(parameter => new ViewCreationPreflightDeclaredParameter(parameter.Name, parameter.TypeName, parameter.IsOutput))
+                    .ToList();
+                var requestedParameters = requested ?? [];
+                if (requestedParameters.Count == 0)
+                {
+                    AddCheck(5, FromParameters(canonical!, parameters), gaps, completed);
+                }
+                else
+                {
+                    var parameterGaps = ResolveParameters(requestedParameters, parameters, out resolvedParameters);
+                    if (parameterGaps.Count == 0)
+                    {
+                        completed.Add(5);
+                    }
+                    else
+                    {
+                        gaps.AddRange(parameterGaps);
+                    }
+                }
                 var determinable = true;
                 var visibleColumns = 0;
                 try
@@ -128,7 +162,7 @@ public sealed class ViewCreationPreflightService
             }
         }
         _logger.LogInformation("Grid preflight completed. CompletedChecks: {CompletedChecks}, GapCount: {GapCount}", completed.Count, gaps.Count);
-        return result with { Gaps = gaps, CanonicalStoredProcedure = canonical, CompletedChecks = completed };
+        return result with { Gaps = gaps, CanonicalStoredProcedure = canonical, CompletedChecks = completed, Parameters = resolvedParameters, DeclaredParameters = declaredParameters };
     }
 
     /// <summary>
@@ -166,6 +200,126 @@ public sealed class ViewCreationPreflightService
             parameters.Count == 1 && parameters[0].Name == "@QueryString" && !parameters[0].IsOutput)
         ? null : Reject("SP con parámetros no admitidos por la plantilla");
 
+    /// <summary>Límite propio de DesignerIA para el valor de un parámetro de tipo (max).</summary>
+    public const int MaxTypeValueLength = 500;
+
+    /// <summary>Tipos de cadena: Designer los marca con UsaComillas = 1; los enteros y bit, con 0.</summary>
+    public static bool UsesQuotes(string type) => type is "varchar" or "nvarchar" or "char" or "nchar";
+
+    /// <summary>
+    /// Contrasta los parámetros con valor fijo del ViewSpec con los que declara el
+    /// procedimiento y los devuelve en su orden de declaración, con el nombre del
+    /// catálogo sin «@» y su tipo base. Exige cobertura exacta de los parámetros de
+    /// entrada: no se usa sys.parameters.has_default_value para decidir omisiones.
+    /// Es puro: la lectura de sys.parameters la hace <see cref="CheckAsync"/>.
+    /// </summary>
+    public static IReadOnlyList<ViewScriptGenerationGap> ResolveParameters(
+        IReadOnlyList<ViewSpecParameter> requested, IReadOnlyList<ViewProcedureParameter> declared,
+        out IReadOnlyList<ViewCreationPreflightParameter>? resolved)
+    {
+        var gaps = new List<ViewScriptGenerationGap>();
+        var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var parameter in requested)
+        {
+            values[ViewScriptGenerationValidator.TryParseParameterName(parameter?.Name, out var requestedName)
+                ? requestedName : parameter?.Name ?? string.Empty] = parameter?.DefaultValue;
+        }
+        var declaration = declared.Count == 0
+            ? "El procedimiento no declara parámetros."
+            : "El procedimiento declara: " + string.Join(", ", declared.Select(parameter => $"{parameter.Name} ({parameter.TypeName ?? "tipo desconocido"})")) + ".";
+        var declaredNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var result = new List<ViewCreationPreflightParameter>();
+        foreach (var parameter in declared)
+        {
+            var name = parameter.Name.StartsWith('@') ? parameter.Name[1..] : parameter.Name;
+            var type = parameter.TypeName;
+            if (!declaredNames.Add(name) || !ViewScriptGenerationValidator.TryParseParameterName(name, out _))
+            {
+                gaps.Add(new("Nombre de parámetro no admitido",
+                    $"El procedimiento declara el parámetro «{name}», cuyo nombre no es un identificador ASCII único de hasta 75 caracteres."));
+            }
+            else if (parameter.IsOutput)
+            {
+                gaps.Add(new("Parámetro de salida no admitido", $"El parámetro «{name}» es de salida; sólo se admiten parámetros de entrada."));
+            }
+            else if (parameter.IsTableType)
+            {
+                gaps.Add(new("Parámetro de tipo tabla no admitido", $"El parámetro «{name}» es de tipo tabla; no admite un valor fijo."));
+            }
+            else if (name.ToLowerInvariant() is "logon_user" or "gruposvistausuario")
+            {
+                gaps.Add(new("Parámetro resuelto por Motor",
+                    $"Motor sustituye el valor del parámetro «{name}» con datos del contexto de ejecución; no admite un valor fijo."));
+            }
+            else if (type is not ("varchar" or "nvarchar" or "char" or "nchar" or "int" or "bigint" or "smallint" or "tinyint" or "bit"))
+            {
+                gaps.Add(new("Tipo de parámetro no admitido",
+                    $"El parámetro «{name}» es de tipo {type ?? "desconocido"}. Se admiten varchar, nvarchar, char, nchar, int, bigint, smallint, tinyint y bit."));
+            }
+            else if (!values.TryGetValue(name, out var value))
+            {
+                gaps.Add(new("Parámetros no coinciden con el procedimiento", $"Falta el valor del parámetro «{name}». {declaration}"));
+            }
+            else if (DescribeTypedValueProblem(type, parameter.MaxLength, value) is { } problem)
+            {
+                gaps.Add(new("Valor de parámetro no admitido", $"El valor del parámetro «{name}» {problem}"));
+            }
+            else
+            {
+                result.Add(new(name, type, value!));
+            }
+        }
+        foreach (var name in values.Keys.Where(name => !declaredNames.Contains(name)))
+        {
+            gaps.Add(new("Parámetros no coinciden con el procedimiento", $"El procedimiento no tiene el parámetro «{name}». {declaration}"));
+        }
+        resolved = gaps.Count == 0 ? result : null;
+        return gaps;
+    }
+
+    /// <summary>
+    /// Motivo por el que un valor no es válido para el tipo del parámetro, o null si
+    /// lo es. Los enteros y bit se envían a Motor sin comillas, por eso sólo admiten
+    /// su representación decimal estricta. La longitud se mide en caracteres: con
+    /// ASCII, max_length equivale a caracteres en varchar/char y al doble en nvarchar/nchar.
+    /// </summary>
+    public static string? DescribeTypedValueProblem(string type, int maxLength, string? value)
+    {
+        if (value is null)
+        {
+            return "no está informado.";
+        }
+        switch (type)
+        {
+            case "bit":
+                return value is "0" or "1" ? null : "debe ser 0 o 1 para un parámetro bit.";
+            case "tinyint":
+                return DescribeIntegerProblem(value, byte.MinValue, byte.MaxValue, type);
+            case "smallint":
+                return DescribeIntegerProblem(value, short.MinValue, short.MaxValue, type);
+            case "int":
+                return DescribeIntegerProblem(value, int.MinValue, int.MaxValue, type);
+            case "bigint":
+                return DescribeIntegerProblem(value, long.MinValue, long.MaxValue, type);
+            default:
+                if (maxLength < 0)
+                {
+                    return value.Length <= MaxTypeValueLength ? null
+                        : $"tiene {value.Length} caracteres; para parámetros {type}(max) DesignerIA admite hasta {MaxTypeValueLength}. Es un límite propio de DesignerIA.";
+                }
+                var limit = type is "nvarchar" or "nchar" ? maxLength / 2 : maxLength;
+                return value.Length <= limit ? null
+                    : $"tiene {value.Length} caracteres y el parámetro {type}({limit}) admite hasta {limit}.";
+        }
+    }
+
+    private static string? DescribeIntegerProblem(string value, long minimum, long maximum, string type) =>
+        Regex.IsMatch(value, @"\A(?:0|-?[1-9][0-9]{0,18})\z")
+            && long.TryParse(value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var number)
+            && number >= minimum && number <= maximum
+            ? null
+            : $"debe ser un entero decimal entre {minimum} y {maximum} para un parámetro {type}, sin separadores, espacios, signo «+» ni ceros a la izquierda.";
+
     public static ViewScriptGenerationGap? FromFirstResult(bool determinable, int visibleColumns) =>
         !determinable ? Reject("Resultado no determinable") :
         visibleColumns < 2 ? Reject("Resultado incompatible") : null;
@@ -198,4 +352,7 @@ public sealed class ViewCreationPreflightService
     }
 }
 
-public record ViewProcedureParameter(string Name, bool IsOutput);
+/// <summary>Parámetro tal como lo declara el procedimiento en sys.parameters.</summary>
+/// <param name="TypeName">Tipo base (TYPE_NAME del system_type_id), o null si no se pudo resolver.</param>
+/// <param name="MaxLength">max_length en bytes; -1 para los tipos (max).</param>
+public record ViewProcedureParameter(string Name, bool IsOutput, string? TypeName = null, int MaxLength = 0, bool IsTableType = false);

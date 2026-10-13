@@ -68,7 +68,22 @@ public sealed partial class ViewCreationService
     /// esté permitida y que no haya otra en curso; después genera el script, lo
     /// ejecuta y verifica lo que quedó en la base. No reintenta.
     /// </summary>
-    public async Task<ViewCreationResult> CreateAsync(ViewSpec spec, ClaimsPrincipal user)
+    public Task<ViewCreationResult> CreateAsync(ViewSpec spec, ClaimsPrincipal user) => CreateAsync(user, async auditUser =>
+    {
+        // Sin el token de la petición: una petición abortada no debe dejar la creación a medias.
+        var generation = await GenerateAsync(spec, auditUser, CancellationToken.None);
+        return !generation.CanGenerate || generation.Script is null || generation.Preflight is null
+            ? new ViewCreationPreparation(null, null, generation.Gaps)
+            : new(ViewCreationPlanFactory.Create(ViewSpecNormalizer.Normalize(spec), generation.Preflight), generation.Script, []);
+    });
+
+    /// <summary>
+    /// Ejecución y verificación compartidas por las rutas por ViewSpec y por la entrada por
+    /// documento. <paramref name="prepare"/> recibe el usuario de auditoría y devuelve el plan y
+    /// su script, o los motivos por los que no se puede crear; se invoca con la creación ya
+    /// permitida y reservada, justo antes de ejecutar.
+    /// </summary>
+    public async Task<ViewCreationResult> CreateAsync(ClaimsPrincipal user, Func<string, Task<ViewCreationPreparation>> prepare)
     {
         var identity = user.Identity;
         var commandTimeoutSeconds = _configuration.GetValue("ViewCreation:CommandTimeoutSeconds", 60);
@@ -99,18 +114,16 @@ public sealed partial class ViewCreationService
         try
         {
             var auditUser = identity!.Name!;
-            // Sin el token de la petición: una petición abortada no debe dejar la creación a medias.
-            var generation = await GenerateAsync(spec, auditUser, CancellationToken.None);
-            if (!generation.CanGenerate || generation.Script is null || generation.Preflight is null)
+            var preparation = await prepare(auditUser);
+            if (preparation.Plan is not { } plan || preparation.Script is not { } script)
             {
-                _logger.LogInformation("View creation rejected before execution. GapCount: {GapCount}", generation.Gaps.Count);
-                return new(ViewCreationStatus.Rejected, null, "La vista no se creó: no se puede generar su script. " + NoChanges, generation.Gaps, []);
+                _logger.LogInformation("View creation rejected before execution. GapCount: {GapCount}", preparation.Gaps.Count);
+                return new(ViewCreationStatus.Rejected, null, "La vista no se creó: no se puede generar su script. " + NoChanges, preparation.Gaps, []);
             }
 
-            var plan = ViewCreationPlanFactory.Create(ViewSpecNormalizer.Normalize(spec), generation.Preflight);
-            var execution = await ExecuteScriptAsync(generation.Script, commandTimeoutSeconds);
-            var snapshot = await ReadSnapshotAsync(plan.View.Name, plan.Grid?.ConnectionAlias);
-            var result = Decide(plan, auditUser, execution, snapshot, motorBaseUrl);
+            var execution = await ExecuteScriptAsync(script, commandTimeoutSeconds);
+            var snapshot = await ReadSnapshotAsync(plan);
+            var result = Decide(plan, auditUser, execution, snapshot, motorBaseUrl, _configuration.GetValue<bool>("Motor:IsMock"));
             _logger.LogInformation(
                 "View creation finished in {ElapsedMs} ms. ViewName: {ViewName}. Status: {Status}. Execution: {Execution}. SqlErrors: {SqlErrors}. TranCountAfter: {TranCountAfter}. SnapshotRead: {SnapshotRead}. ViewUrlReturned: {ViewUrlReturned}",
                 stopwatch.ElapsedMilliseconds, plan.View.Name, result.Status, execution.Kind,
@@ -224,7 +237,7 @@ public sealed partial class ViewCreationService
     /// si se recibe una URL base de Motor ya validada.
     /// </summary>
     public static ViewCreationResult Decide(ViewCreationPlan plan, string auditUser, ScriptExecution execution, ViewCreationSnapshot? snapshot,
-        string? motorBaseUrl = null)
+        string? motorBaseUrl = null, bool motorIsMock = false)
     {
         var diagnostics = new List<string>(execution.Diagnostics ?? []);
         var sessionConfirmed = execution.TranCountAfter == 0 && !execution.RolledBackAfter;
@@ -261,7 +274,8 @@ public sealed partial class ViewCreationService
                 {
                     return Indeterminate("el script terminó sin error, pero no se pudo verificar el resultado.");
                 }
-                var mismatches = ViewCreationVerifier.Compare(plan, auditUser, snapshot.Counts, snapshot.ValueRows, snapshot.Values);
+                var mismatches = ViewCreationVerifier.Compare(plan, auditUser, snapshot.Counts, snapshot.ValueRows, snapshot.Values,
+                    snapshot.ParameterRows, snapshot.MappingRows, snapshot.StateValues, snapshot.ControlRows, snapshot.ControlItemRows);
                 if (mismatches.Count > 0)
                 {
                     diagnostics.AddRange(mismatches);
@@ -278,7 +292,11 @@ public sealed partial class ViewCreationService
                 {
                     diagnostics.Add("Este ambiente no tiene una URL base de Motor configurada: la vista se creó sin URL.");
                 }
-                return new(ViewCreationStatus.Created, plan.View.Name, $"Vista «{plan.View.Name}» creada y verificada en la base de metadata.", [], diagnostics, viewUrl);
+                if (viewUrl is not null && motorIsMock)
+                {
+                    diagnostics.Add("El enlace de Motor es de referencia (mock); no corresponde a la base local ni confirma su apertura.");
+                }
+                return new(ViewCreationStatus.Created, plan.View.Name, $"Vista «{plan.View.Name}» creada y verificada en la base de metadata.", [], diagnostics, viewUrl, viewUrl is not null && motorIsMock);
 
             case ScriptExecutionKind.RolledBackByScript:
                 diagnostics.Add($"El script revirtió sus cambios. Error original {execution.OriginalNumber}, estado {execution.OriginalState}.");
@@ -305,6 +323,7 @@ public sealed partial class ViewCreationService
         (50000, 1) => "Ya existe una vista con ese nombre. " + NoChanges,
         (50000, 2) => "El alias de conexión no existe o es ambiguo en la base. " + NoChanges,
         (50000, 3) or (50000, 4) => "Otra creación entró en conflicto con ésta. " + NoChanges,
+        (50000, 5) => "El catálogo de tipos de web control de la base no es el esperado. " + NoChanges,
         (1222, _) => "La base estaba ocupada y la espera se agotó. " + NoChanges,
         (1205, _) => "La creación entró en conflicto con otra operación y fue revertida. " + NoChanges,
         (2627, _) or (2601, _) => "Otra operación usó los mismos identificadores. " + NoChanges,
@@ -402,8 +421,11 @@ public sealed partial class ViewCreationService
     /// Lee, desde otra conexión, los conteos y los valores de la vista. Devuelve
     /// null si la lectura falla: en ese caso el resultado no se puede confirmar.
     /// </summary>
-    private async Task<ViewCreationSnapshot?> ReadSnapshotAsync(string viewName, string? connectionAlias)
+    private async Task<ViewCreationSnapshot?> ReadSnapshotAsync(ViewCreationPlan plan)
     {
+        var viewName = plan.View.Name;
+        var blocks = plan.StateBlocks;
+        var connectionAlias = blocks[0].Grid?.ConnectionAlias;
         try
         {
             await using var connection = new SqlConnection(_connectionString);
@@ -439,12 +461,67 @@ public sealed partial class ViewCreationService
                     }
                 }
             }
-            return new(counts, valueRows, values);
+            var parameterRows = new List<IReadOnlyDictionary<string, string?>>();
+            var mappingRows = new List<IReadOnlyDictionary<string, string?>>();
+            await using (var command = CreateReadCommand(connection, ViewCreationVerifier.ParametersSql, viewName, null))
+            await using (var reader = await command.ExecuteReaderAsync(CancellationToken.None))
+            {
+                await ReadRowsAsync(reader, parameterRows);
+                if (!await reader.NextResultAsync(CancellationToken.None))
+                {
+                    throw new InvalidOperationException("The parameter verification read did not return the mappings result set.");
+                }
+                await ReadRowsAsync(reader, mappingRows);
+            }
+            // Con varios estados, la lectura de valores se repite con el alias de cada grilla
+            // y de cada lectura se toma la fila de su estado.
+            Dictionary<string, IReadOnlyDictionary<string, string?>>? stateValues = null;
+            if (blocks.Count > 1)
+            {
+                stateValues = new(StringComparer.Ordinal);
+                foreach (var block in blocks)
+                {
+                    var rows = new List<IReadOnlyDictionary<string, string?>>();
+                    await using var command = CreateReadCommand(connection, ViewCreationVerifier.ValuesSql, viewName, block.Grid?.ConnectionAlias ?? string.Empty);
+                    await using var reader = await command.ExecuteReaderAsync(CancellationToken.None);
+                    await ReadRowsAsync(reader, rows);
+                    if (rows.SingleOrDefault(row => row.GetValueOrDefault("Estados.Descripcion") == block.State.Name) is { } row)
+                    {
+                        stateValues[block.State.Name] = row;
+                    }
+                }
+            }
+            var controlRows = new List<IReadOnlyDictionary<string, string?>>();
+            var controlItemRows = new List<IReadOnlyDictionary<string, string?>>();
+            await using (var command = CreateReadCommand(connection, ViewCreationVerifier.ControlsSql, viewName, null))
+            await using (var reader = await command.ExecuteReaderAsync(CancellationToken.None))
+            {
+                await ReadRowsAsync(reader, controlRows);
+                if (!await reader.NextResultAsync(CancellationToken.None))
+                {
+                    throw new InvalidOperationException("The control verification read did not return the items result set.");
+                }
+                await ReadRowsAsync(reader, controlItemRows);
+            }
+            return new(counts, valueRows, values, parameterRows, mappingRows, stateValues, controlRows, controlItemRows);
         }
         catch (Exception exception)
         {
             _logger.LogError(exception, "View creation verification read failed. ViewName: {ViewName}", viewName);
             return null;
+        }
+    }
+
+    private static async Task ReadRowsAsync(SqlDataReader reader, List<IReadOnlyDictionary<string, string?>> rows)
+    {
+        while (await reader.ReadAsync(CancellationToken.None))
+        {
+            var row = new Dictionary<string, string?>();
+            for (var i = 0; i < reader.FieldCount; i++)
+            {
+                row[reader.GetName(i)] = reader.IsDBNull(i) ? null : Convert.ToString(reader.GetValue(i), CultureInfo.InvariantCulture);
+            }
+            rows.Add(row);
         }
     }
 
@@ -493,8 +570,28 @@ public record ScriptExecution(
     int? TranCountAfter = null,
     bool RolledBackAfter = false);
 
-/// <summary>Lo leído de la base después de ejecutar: conteos independientes y valores.</summary>
+/// <summary>
+/// Lo leído de la base después de ejecutar: conteos independientes, valores y los
+/// conjuntos completos de parámetros y mapeos de la vista.
+/// </summary>
+/// <param name="StateValues">Con varios estados, la fila de valores de cada estado por su nombre.</param>
+/// <param name="ControlRows">Web controls de la vista con su configuración.</param>
+/// <param name="ControlItemRows">Opciones de esos web controls.</param>
 public record ViewCreationSnapshot(
     IReadOnlyDictionary<string, int> Counts,
     int ValueRows,
-    IReadOnlyDictionary<string, string?>? Values);
+    IReadOnlyDictionary<string, string?>? Values,
+    IReadOnlyList<IReadOnlyDictionary<string, string?>>? ParameterRows = null,
+    IReadOnlyList<IReadOnlyDictionary<string, string?>>? MappingRows = null,
+    IReadOnlyDictionary<string, IReadOnlyDictionary<string, string?>>? StateValues = null,
+    IReadOnlyList<IReadOnlyDictionary<string, string?>>? ControlRows = null,
+    IReadOnlyList<IReadOnlyDictionary<string, string?>>? ControlItemRows = null);
+
+/// <summary>
+/// Lo que se va a ejecutar: el plan y su script, o los motivos por los que no se
+/// puede crear. El script sale siempre de <see cref="ViewScriptGenerator"/>.
+/// </summary>
+public record ViewCreationPreparation(
+    ViewCreationPlan? Plan,
+    string? Script,
+    IReadOnlyList<ViewScriptGenerationGap> Gaps);

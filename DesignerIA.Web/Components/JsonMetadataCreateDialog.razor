@@ -1,0 +1,72 @@
+@inject IJSRuntime JS
+
+<div class="modal-overlay">
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="jsonmeta-file-title" @ref="_dialog" @onkeydown="CerrarConTeclaAsync">
+        <div class="modal-title" id="jsonmeta-file-title">Preparar vista</div>
+        <div class="modal-body">
+            <label class="modal-label" for="jsonmeta-file">Selecciona un archivo JSONMetadata</label>
+            <InputFile id="jsonmeta-file" class="modal-input" accept=".json,application/json" OnChange="LeerArchivoAsync" disabled="@_leyendo" />
+            <div class="jsonmeta-needed">El borrador se abrirá en el espacio central para revisarlo y ajustarlo.</div>
+            @if (ReplacesDraft)
+            {
+                <div class="modal-message">El archivo seleccionado reemplazará el borrador actual. Puedes guardarlo como JSON antes de cargar otro.</div>
+            }
+            @if (_mensaje is not null)
+            {
+                <div class="modal-message" role="status">@_mensaje</div>
+            }
+        </div>
+        <div class="modal-actions">
+            <button type="button" class="modal-button-secondary" disabled="@_leyendo" @onclick="OnClose">Cancelar</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    private const long TamanoMaximo = 256 * 1024;
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback<(string FileName, string Content)> OnLoaded { get; set; }
+    [Parameter] public bool ReplacesDraft { get; set; }
+    private ElementReference _dialog;
+    private bool _leyendo;
+    private string? _mensaje;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender) { await JS.InvokeVoidAsync("designeriaDraft.focusDialog", _dialog); }
+    }
+
+    private Task CerrarConTeclaAsync(KeyboardEventArgs e) => e.Key == "Escape" && !_leyendo ? OnClose.InvokeAsync() : Task.CompletedTask;
+
+    private async Task LeerArchivoAsync(InputFileChangeEventArgs e)
+    {
+        if (_leyendo) { return; }
+        _mensaje = null;
+        if (!e.File.Name.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+        {
+            _mensaje = "Selecciona un archivo .json. La carga de Word, TXT y SQL todavía no está disponible.";
+            return;
+        }
+        if (e.File.Size > TamanoMaximo)
+        {
+            _mensaje = $"El archivo supera el tamaño máximo de {TamanoMaximo / 1024} KB.";
+            return;
+        }
+        _leyendo = true;
+        try
+        {
+            await using var stream = e.File.OpenReadStream(TamanoMaximo);
+            using var reader = new StreamReader(stream);
+            var content = await reader.ReadToEndAsync();
+            await OnLoaded.InvokeAsync((e.File.Name, content));
+        }
+        catch (IOException)
+        {
+            _mensaje = "No se pudo leer el archivo. El borrador anterior se conserva.";
+        }
+        finally
+        {
+            _leyendo = false;
+        }
+    }
+}

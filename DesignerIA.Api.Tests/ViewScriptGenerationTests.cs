@@ -3,7 +3,6 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using DesignerIA.Api.Services;
-using DesignerIA.Api.Services.ViewTemplates;
 using DesignerIA.Api.Services.ViewScripts;
 using DesignerIA.Api.Services.ViewSpecs;
 using DesignerIA.Contracts;
@@ -570,7 +569,7 @@ public sealed class ViewScriptGenerationTests
     }
 
     [Fact]
-    public void TemplateProducesContractExampleJson()
+    public void GridSpecMatchesContractExampleJson()
     {
         const string expected = """
             {
@@ -589,7 +588,8 @@ public sealed class ViewScriptGenerationTests
                     "storedProcedure": "dbo.PRC_GET_GRID_TEST_SORT_COLUMN",
                     "connectionAlias": "GestionEngine",
                     "configurationPreset": "grid-consulta-v1",
-                    "handlers": []
+                    "handlers": [],
+                    "parameters": null
                   }]
                 }]
               }]
@@ -688,8 +688,382 @@ public sealed class ViewScriptGenerationTests
         AssertRejected(Generate(spec with { InitialState = stateName, States = [new(stateName, [])] }));
     }
 
-    private static ViewSpec GridSpec() => GridQueryTemplate.Create(new(
-        "vConsultaPrueba01", "Consulta de prueba con grilla", "dbo.PRC_GET_GRID_TEST_SORT_COLUMN", "GestionEngine"));
+    [Fact]
+    public void NullAndEmptyParametersKeepTheCurrentGridScript()
+    {
+        var current = ViewScriptGenerator.Generate(GridSpec(), CompleteGridPreflight(), AuditUser);
+        var area = GridSpec().States![0].Rows![0].Areas![0];
+        Assert.Null(area.Parameters);
+
+        var empty = ViewScriptGenerator.Generate(WithArea(GridSpec(), area with { Parameters = [] }),
+            CompleteGridPreflight() with { Parameters = [] }, AuditUser);
+
+        Assert.True(current.CanGenerate);
+        Assert.True(empty.CanGenerate);
+        Assert.Equal(current.Script, empty.Script);
+        Assert.DoesNotContain("IDX_SPParam", current.Script);
+    }
+
+    [Fact]
+    public void TwoFixedParametersInsertTheirRowsInBothTablesInDeclarationOrder()
+    {
+        // Capturados en otro orden, con «@» y con otra capitalización: el script usa los nombres y el orden del procedimiento.
+        var spec = ExampleSpec(new("@paramdos", "FIJO-DOS-61"), new("ParamUno", "FIJO-UNO-61"));
+        var result = ViewScriptGenerator.Generate(spec, ExamplePreflight(spec), AuditUser);
+        Assert.True(result.CanGenerate);
+        Assert.Empty(result.Gaps);
+        var script = result.Script!;
+
+        Assert.Equal(new[] { "Vistas", "Estados", "Filas", "Areas", "ExtraccionesDatos", "StoredProcedure",
+            "ParametrosSP", "ParametrosSP", "MapeoParametros", "MapeoParametros",
+            "ObjetosDeArea", "ConfiguracionesObjetoDeArea", "LeftMenus", "ConfiguracionesEstados" },
+            Regex.Matches(script, @"INSERT INTO dbo\.(\w+)").Select(match => match.Groups[1].Value).ToArray());
+
+        var parameters = GetInsertRows(script, "ParametrosSP");
+        Assert.All(parameters, row => Assert.Equal(
+            "IdParametroSP,IdStoredProcedure,Nombre,UsaComillas,EsMyVision,User_Create,User_Update,F_Create,F_Update,TipoParametro".Split(','),
+            row.Keys.ToArray()));
+        Assert.Equal(new[] { "@IDX_SPParam", "@IDX_StoredProcedure", "N'ParamUno'", "1", "0", "N'TestAuditUser'", "NULL", "GETDATE()", "NULL", "'varchar'" },
+            parameters[0].Values.ToArray());
+        Assert.Equal(new[] { "@IDX_SPParam", "@IDX_StoredProcedure", "N'ParamDos'", "1", "0", "N'TestAuditUser'", "NULL", "GETDATE()", "NULL", "'varchar'" },
+            parameters[1].Values.ToArray());
+
+        var mappings = GetInsertRows(script, "MapeoParametros");
+        Assert.All(mappings, row => Assert.Equal(
+            "IdMapeoParametro,IdEstado,NombreArea,Parametro,Variable,ValorDefault,IdStoredProcedure,VariableRequest,User_Create,User_Update,F_Create,F_Update".Split(','),
+            row.Keys.ToArray()));
+        Assert.Equal(new[] { "@IDX_SPParamBinding", "@IDX_Estado", "N'Area01'", "N'ParamUno'", "N''", "N'FIJO-UNO-61'", "@IDX_StoredProcedure", "N''", "N'TestAuditUser'", "NULL", "GETDATE()", "NULL" },
+            mappings[0].Values.ToArray());
+        Assert.Equal(new[] { "@IDX_SPParamBinding", "@IDX_Estado", "N'Area01'", "N'ParamDos'", "N''", "N'FIJO-DOS-61'", "@IDX_StoredProcedure", "N''", "N'TestAuditUser'", "NULL", "GETDATE()", "NULL" },
+            mappings[1].Values.ToArray());
+
+        // Mismo patrón de IDs: MAX bloqueado, una vez por tabla, e incremento por fila entre registros.
+        Assert.Equal(new[] { "Estados", "Filas", "Areas", "ExtraccionesDatos", "StoredProcedure", "ObjetosDeArea",
+            "ConfiguracionesObjetoDeArea", "LeftMenus", "ParametrosSP", "MapeoParametros" },
+            Regex.Matches(script, @"SELECT @IDX_\w+ = ISNULL\(MAX\(\w+\), 1\) \+ 1 FROM dbo\.(\w+) WITH \(UPDLOCK, HOLDLOCK\);")
+                .Select(match => match.Groups[1].Value).ToArray());
+        Assert.Contains("SELECT @IDX_SPParam = ISNULL(MAX(IdParametroSP), 1) + 1 FROM dbo.ParametrosSP WITH (UPDLOCK, HOLDLOCK);", script);
+        Assert.Contains("SELECT @IDX_SPParamBinding = ISNULL(MAX(IdMapeoParametro), 1) + 1 FROM dbo.MapeoParametros WITH (UPDLOCK, HOLDLOCK);", script);
+        Assert.Single(Regex.Matches(script, @"SET @IDX_SPParam = @IDX_SPParam \+ 1;"));
+        Assert.Single(Regex.Matches(script, @"SET @IDX_SPParamBinding = @IDX_SPParamBinding \+ 1;"));
+        Assert.True(script.LastIndexOf("dbo.MapeoParametros (", StringComparison.Ordinal) < script.IndexOf("INSERT INTO dbo.ObjetosDeArea", StringComparison.Ordinal));
+        Assert.True(script.LastIndexOf("dbo.MapeoParametros (", StringComparison.Ordinal) < script.IndexOf("COMMIT TRANSACTION", StringComparison.Ordinal));
+        Assert.Contains("FROM dbo.StringsConnection WHERE StringConnection = N'GestionEngine';", script);
+        Assert.DoesNotMatch(@"IdStringConnection[^\r\n]*\b14\b", script);
+        foreach (var forbidden in new[] { "DROP TABLE IF EXISTS", "THROW", "TRY_CONVERT", "IIF", "CONCAT", "OFFSET", "FETCH", "SEQUENCE",
+            "DATEFROMPARTS", "EOMONTH", "FORMAT", "JSON_VALUE", "OPENJSON", "STRING_SPLIT", "STRING_AGG", "CREATE OR ALTER", "SET FMTONLY", "WebControls", "Handlers" })
+        {
+            Assert.False(Regex.IsMatch(script, @"\b" + Regex.Escape(forbidden) + @"\b", RegexOptions.IgnoreCase), forbidden);
+        }
+    }
+
+    [Fact]
+    public void IntegerAndBitParametersAreWrittenWithoutQuotesFlagAndTextIsPreservedExactly()
+    {
+        var declared = new ViewProcedureParameter[]
+        {
+            new("@Cantidad", false, "int", 4), new("@Activo", false, "bit", 1), new("@Titulo", false, "nvarchar", 40)
+        };
+        var spec = ExampleSpec(new("Cantidad", "-25"), new("Activo", "1"), new("Titulo", "  A+b & NULL  "));
+        Assert.Empty(ViewCreationPreflightService.ResolveParameters(spec.States![0].Rows![0].Areas![0].Parameters!, declared, out var resolved));
+        var result = ViewScriptGenerator.Generate(spec, ExamplePreflight(ExampleSpec()) with { Parameters = resolved }, AuditUser);
+        Assert.True(result.CanGenerate);
+
+        var parameters = GetInsertRows(result.Script!, "ParametrosSP");
+        Assert.Equal(new[] { "N'Cantidad'|0|'int'", "N'Activo'|0|'bit'", "N'Titulo'|1|'nvarchar'" },
+            parameters.Select(row => $"{row["Nombre"]}|{row["UsaComillas"]}|{row["TipoParametro"]}").ToArray());
+        Assert.All(parameters, row => Assert.Equal("0", row["EsMyVision"]));
+        // El texto «NULL» es texto, no un NULL de SQL; los espacios iniciales y finales se conservan.
+        Assert.Contains("N'Titulo', N'', N'  A+b & NULL  ', @IDX_StoredProcedure, N'',", result.Script!);
+        Assert.Contains("N'Cantidad', N'', N'-25', @IDX_StoredProcedure, N'',", result.Script!);
+        Assert.Equal(2, Regex.Matches(result.Script!, @"SET @IDX_SPParam = @IDX_SPParam \+ 1;").Count);
+    }
+
+    [Theory]
+    [InlineData("1abc")]
+    [InlineData("con espacio")]
+    [InlineData("Año")]
+    [InlineData("")]
+    [InlineData(null)]
+    [InlineData("@@Doble")]
+    [InlineData("ParamUno ")]
+    [InlineData("a234567890b234567890c234567890d234567890e234567890f234567890g234567890h23456")]
+    public void ParameterNameMustBeAnAsciiIdentifierOfUpTo75Characters(string? name)
+    {
+        var spec = ExampleSpec(new(name, "valor"), new("ParamDos", "valor"));
+        var result = ViewScriptGenerator.Generate(spec, ExamplePreflight(ExampleSpec()), AuditUser);
+
+        AssertRejected(result);
+        Assert.Contains(result.Gaps, gap => gap.Topic == "Nombre de parámetro no admitido" && gap.Description.Contains("#1"));
+    }
+
+    [Fact]
+    public void NullParameterElementIsRejectedByPositionWithoutExceptionOrScript()
+    {
+        // Es lo que produce un JSON con «null» dentro de la lista de parámetros.
+        var parameters = JsonSerializer.Deserialize<ViewSpecArea>(
+            """{"parameters":[{"name":"ParamUno","defaultValue":"a"},null]}""",
+            new JsonSerializerOptions(JsonSerializerDefaults.Web))!.Parameters!;
+        Assert.Null(parameters[1]);
+        var spec = GridViewSpec(null, "dbo.PRC_GET_GRID_EXAMPLE_DESIGNERIA", parameters);
+
+        var result = ViewScriptGenerator.Generate(spec, ExamplePreflight(ExampleSpec()), AuditUser);
+
+        AssertRejected(result);
+        var gap = Assert.Single(result.Gaps);
+        Assert.Equal("Parámetro no informado", gap.Topic);
+        Assert.Contains("#2", gap.Description);
+        // El contraste con el procedimiento tampoco falla con ese elemento: lo informa como rechazo.
+        Assert.NotEmpty(ViewCreationPreflightService.ResolveParameters(parameters, ExampleDeclared(), out var resolved));
+        Assert.Null(resolved);
+    }
+
+    [Fact]
+    public void ParameterNameAcceptsOptionalAtSignAndLimitAndRejectsDuplicatesIgnoringCase()
+    {
+        var limit = new string('p', 75);
+        Assert.True(ViewScriptGenerationValidator.TryParseParameterName("@" + limit, out var parsed));
+        Assert.Equal(limit, parsed);
+        Assert.True(ViewScriptGenerationValidator.TryParseParameterName("_Param_1", out _));
+        Assert.False(ViewScriptGenerationValidator.TryParseParameterName(limit + "p", out _));
+
+        var duplicated = ExampleSpec(new("ParamUno", "a"), new("@PARAMUNO", "b"));
+        var result = ViewScriptGenerator.Generate(duplicated, ExamplePreflight(ExampleSpec()), AuditUser);
+
+        AssertRejected(result);
+        Assert.Contains(result.Gaps, gap => gap.Topic == "Parámetro duplicado" && gap.Description.Contains("PARAMUNO"));
+    }
+
+    [Theory]
+    [InlineData(null, "Valor de parámetro no informado")]
+    [InlineData("", "Valor de parámetro no informado")]
+    [InlineData("O'Brien", "Valor de parámetro no admitido")]
+    [InlineData("dice \"hola\"", "Valor de parámetro no admitido")]
+    [InlineData(@"ruta\archivo", "Valor de parámetro no admitido")]
+    [InlineData("a<b", "Valor de parámetro no admitido")]
+    [InlineData("a>b", "Valor de parámetro no admitido")]
+    [InlineData("línea", "Valor de parámetro no admitido")]
+    [InlineData("dos\nlíneas", "Valor de parámetro no admitido")]
+    [InlineData("dos\r\nlineas", "Valor de parámetro no admitido")]
+    [InlineData("tab\tulado", "Valor de parámetro no admitido")]
+    [InlineData("control\u007f", "Valor de parámetro no admitido")]
+    [InlineData("uno-mas-dos", "Valor de parámetro no admitido")]
+    [InlineData("uno-andpersand-dos", "Valor de parámetro no admitido")]
+    public void ParameterValueIsRejectedWithoutBeingAltered(string? value, string topic)
+    {
+        var spec = ExampleSpec(new("ParamUno", value), new("ParamDos", "valor"));
+        var result = ViewScriptGenerator.Generate(spec, ExamplePreflight(ExampleSpec()), AuditUser);
+
+        AssertRejected(result);
+        var gap = Assert.Single(result.Gaps);
+        Assert.Equal(topic, gap.Topic);
+        Assert.Contains("ParamUno", gap.Description);
+    }
+
+    [Theory]
+    [InlineData("FIJO-UNO-61")]
+    [InlineData("a+b&c")]
+    [InlineData("NULL")]
+    [InlineData("  con espacios  ")]
+    [InlineData(" ")]
+    [InlineData("-MAS-")]
+    [InlineData("mas-")]
+    [InlineData("!#$%()*,./:;=?@[]^_`{|}~")]
+    public void PrintableAsciiValuesAreAcceptedAsWritten(string value)
+    {
+        Assert.Null(ViewScriptGenerationValidator.DescribeParameterValueProblem(value));
+        var spec = ExampleSpec(new("ParamUno", value), new("ParamDos", "valor"));
+        var result = ViewScriptGenerator.Generate(spec, ExamplePreflight(spec), AuditUser);
+
+        Assert.True(result.CanGenerate);
+        Assert.Contains($"N'ParamUno', N'', N'{value}', @IDX_StoredProcedure", result.Script!);
+    }
+
+    [Fact]
+    public void ParametersMustCoverExactlyTheInputParametersOfTheProcedure()
+    {
+        var declared = ExampleDeclared();
+        Assert.Empty(ViewCreationPreflightService.ResolveParameters([new("paramdos", "b"), new("@PARAMUNO", "a")], declared, out var resolved));
+        Assert.Equal(new ViewCreationPreflightParameter[] { new("ParamUno", "varchar", "a"), new("ParamDos", "varchar", "b") }, resolved);
+
+        var missing = Assert.Single(ViewCreationPreflightService.ResolveParameters([new("ParamUno", "a")], declared, out var none));
+        Assert.Null(none);
+        Assert.Equal("Parámetros no coinciden con el procedimiento", missing.Topic);
+        Assert.Contains("Falta el valor del parámetro «ParamDos»", missing.Description);
+        Assert.Contains("@ParamUno (varchar), @ParamDos (varchar)", missing.Description);
+
+        var extra = Assert.Single(ViewCreationPreflightService.ResolveParameters(
+            [new("ParamUno", "a"), new("ParamDos", "b"), new("Otro", "c")], declared, out _));
+        Assert.Equal("Parámetros no coinciden con el procedimiento", extra.Topic);
+        Assert.Contains("no tiene el parámetro «Otro»", extra.Description);
+
+        var withoutParameters = Assert.Single(ViewCreationPreflightService.ResolveParameters([new("ParamUno", "a")], [], out _));
+        Assert.Contains("no declara parámetros", withoutParameters.Description);
+
+        // Nombres del catálogo que Motor no distinguiría (sólo difieren en mayúsculas) o que no son identificadores ASCII.
+        foreach (var second in new[] { "@PARAMUNO", "@Con Espacio" })
+        {
+            Assert.Contains(ViewCreationPreflightService.ResolveParameters([new("ParamUno", "a")],
+                [new("@ParamUno", false, "varchar", 500), new(second, false, "varchar", 500)], out _),
+                gap => gap.Topic == "Nombre de parámetro no admitido");
+        }
+    }
+
+    [Theory]
+    [InlineData("@Salida", true, "int", false, "Parámetro de salida no admitido")]
+    [InlineData("@Tabla", false, "table type", true, "Parámetro de tipo tabla no admitido")]
+    [InlineData("@Fecha", false, "datetime", false, "Tipo de parámetro no admitido")]
+    [InlineData("@Importe", false, "decimal", false, "Tipo de parámetro no admitido")]
+    [InlineData("@Texto", false, "text", false, "Tipo de parámetro no admitido")]
+    [InlineData("@SinTipo", false, null, false, "Tipo de parámetro no admitido")]
+    [InlineData("@logon_user", false, "varchar", false, "Parámetro resuelto por Motor")]
+    [InlineData("@LOGON_USER", false, "varchar", false, "Parámetro resuelto por Motor")]
+    [InlineData("@GruposVistaUsuario", false, "varchar", false, "Parámetro resuelto por Motor")]
+    public void UnsupportedProcedureParametersAreRejectedByName(string name, bool isOutput, string? type, bool isTable, string topic)
+    {
+        var declared = new ViewProcedureParameter[] { new("@ParamUno", false, "varchar", 500), new(name, isOutput, type, 50, isTable) };
+        var requested = new ViewSpecParameter[] { new("ParamUno", "a"), new(name, "1") };
+
+        var gap = Assert.Single(ViewCreationPreflightService.ResolveParameters(requested, declared, out var resolved));
+
+        Assert.Null(resolved);
+        Assert.Equal(topic, gap.Topic);
+        Assert.Contains(name[1..], gap.Description);
+    }
+
+    [Theory]
+    [InlineData("tinyint", "0", true)]
+    [InlineData("tinyint", "255", true)]
+    [InlineData("tinyint", "256", false)]
+    [InlineData("tinyint", "-1", false)]
+    [InlineData("smallint", "-32768", true)]
+    [InlineData("smallint", "32768", false)]
+    [InlineData("int", "2147483647", true)]
+    [InlineData("int", "-2147483648", true)]
+    [InlineData("int", "2147483648", false)]
+    [InlineData("bigint", "9223372036854775807", true)]
+    [InlineData("bigint", "-9223372036854775808", true)]
+    [InlineData("bigint", "9223372036854775808", false)]
+    [InlineData("int", "1.0", false)]
+    [InlineData("int", "1,000", false)]
+    [InlineData("int", "1e3", false)]
+    [InlineData("int", "+1", false)]
+    [InlineData("int", "01", false)]
+    [InlineData("int", "-0", false)]
+    [InlineData("int", " 1", false)]
+    [InlineData("int", "1 ", false)]
+    [InlineData("int", "0x10", false)]
+    [InlineData("int", "1;DROP", false)]
+    [InlineData("int", "1 OR 1=1", false)]
+    [InlineData("int", "NULL", false)]
+    [InlineData("int", "", false)]
+    [InlineData("bit", "0", true)]
+    [InlineData("bit", "1", true)]
+    [InlineData("bit", "2", false)]
+    [InlineData("bit", "true", false)]
+    [InlineData("bit", "NULL", false)]
+    public void IntegerAndBitValuesUseStrictDecimalRepresentationWithinTheTypeRange(string type, string value, bool accepted)
+    {
+        var gaps = ViewCreationPreflightService.ResolveParameters([new("Valor", value)], [new("@Valor", false, type, 8)], out var resolved);
+
+        Assert.Equal(accepted, gaps.Count == 0);
+        if (accepted)
+        {
+            Assert.Equal(value, Assert.Single(resolved!).DefaultValue);
+        }
+        else
+        {
+            var gap = Assert.Single(gaps);
+            Assert.Equal("Valor de parámetro no admitido", gap.Topic);
+            Assert.Contains("«Valor»", gap.Description);
+        }
+    }
+
+    [Theory]
+    [InlineData("varchar", 5, 5, true)]
+    [InlineData("varchar", 5, 6, false)]
+    [InlineData("char", 3, 4, false)]
+    [InlineData("nvarchar", 10, 5, true)]
+    [InlineData("nvarchar", 10, 6, false)]
+    [InlineData("nchar", 4, 3, false)]
+    [InlineData("varchar", -1, 500, true)]
+    [InlineData("varchar", -1, 501, false)]
+    [InlineData("nvarchar", -1, 500, true)]
+    [InlineData("nvarchar", -1, 501, false)]
+    public void TextLengthFollowsTheParameterLengthAndTheDesignerIaCeilingForMaxTypes(string type, int maxLength, int length, bool accepted)
+    {
+        var value = new string('x', length);
+
+        var problem = ViewCreationPreflightService.DescribeTypedValueProblem(type, maxLength, value);
+
+        Assert.Equal(accepted, problem is null);
+        if (!accepted)
+        {
+            Assert.Contains(maxLength < 0 ? "límite propio de DesignerIA" : "admite hasta", problem);
+        }
+        Assert.Equal(500, ViewCreationPreflightService.MaxTypeValueLength);
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("unexpected")]
+    [InlineData("other-value")]
+    [InlineData("other-name")]
+    public void GeneratorRequiresPreflightParametersThatMatchTheViewSpec(string problem)
+    {
+        var spec = ExampleSpec(new("ParamUno", "FIJO-UNO-61"), new("ParamDos", "FIJO-DOS-61"));
+        var preflight = ExamplePreflight(spec);
+        (spec, preflight) = problem switch
+        {
+            "missing" => (spec, preflight with { Parameters = null }),
+            "unexpected" => (ExampleSpec(), preflight),
+            "other-value" => (spec, preflight with { Parameters = [preflight.Parameters![0] with { DefaultValue = "fijo-uno-61" }, preflight.Parameters[1]] }),
+            _ => (spec, preflight with { Parameters = [preflight.Parameters![0] with { Name = "Otro" }, preflight.Parameters[1]] })
+        };
+
+        var result = ViewScriptGenerator.Generate(spec, preflight, AuditUser);
+
+        AssertRejected(result);
+        Assert.Equal("Preflight incompleto", Assert.Single(result.Gaps).Topic);
+    }
+
+    private static ViewSpec ExampleSpec(params ViewSpecParameter[] parameters) =>
+        GridViewSpec("Consulta de prueba con grilla", "dbo.PRC_GET_GRID_EXAMPLE_DESIGNERIA", parameters);
+
+    private static ViewProcedureParameter[] ExampleDeclared() =>
+        [new("@ParamUno", false, "varchar", 500), new("@ParamDos", false, "varchar", 500)];
+
+    private static ViewCreationPreflightResult ExamplePreflight(ViewSpec spec)
+    {
+        IReadOnlyList<ViewCreationPreflightParameter>? resolved = null;
+        if (spec.States![0].Rows![0].Areas![0].Parameters is { } requested)
+        {
+            Assert.Empty(ViewCreationPreflightService.ResolveParameters(requested, ExampleDeclared(), out resolved));
+        }
+        return new(true, "vConsultaPrueba01", null, [], "[dbo].[PRC_GET_GRID_EXAMPLE_DESIGNERIA]", [1, 2, 3, 4, 5, 6], resolved);
+    }
+
+    private static List<Dictionary<string, string>> GetInsertRows(string script, string table) =>
+        Regex.Matches(script, $@"INSERT INTO dbo\.{Regex.Escape(table)} \((?<columns>[^)]+)\)\s+VALUES \((?<values>.*?)\);", RegexOptions.Singleline)
+            .Select(insert =>
+            {
+                var columns = insert.Groups["columns"].Value.Split(',').Select(column => column.Trim()).ToArray();
+                var values = Regex.Matches(insert.Groups["values"].Value, @"N?'(?:''|[^'])*'|[^\s,]+").Select(match => match.Value).ToArray();
+                Assert.Equal(columns.Length, values.Length);
+                return columns.Select((column, index) => (column, value: values[index])).ToDictionary(pair => pair.column, pair => pair.value);
+            }).ToList();
+
+    private static ViewSpec GridSpec() => GridViewSpec("Consulta de prueba con grilla", "dbo.PRC_GET_GRID_TEST_SORT_COLUMN");
+
+    // La forma con grilla que admite el generador: vista go con un estado, una fila y una grilla.
+    private static ViewSpec GridViewSpec(string? description, string storedProcedure,
+        IReadOnlyList<ViewSpecParameter>? parameters = null) => new(
+        "vConsultaPrueba01", description, "Estado01",
+        [new ViewSpecState("Estado01", [new ViewSpecRow(
+            [new ViewSpecArea("Grilla", storedProcedure, "GestionEngine", [],
+                "Area01", "Grilla01", GridConfigurationPresets.GridQuery,
+                parameters is { Count: > 0 } ? parameters : null)], "Fila01")])],
+        "go");
 
     private static ViewCreationPreflightResult CompleteGridPreflight() => new(
         true, "vConsultaPrueba01", null, [], "[dbo].[PRC_GET_GRID_TEST_SORT_COLUMN]", [1, 2, 3, 4, 5, 6]);

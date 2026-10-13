@@ -1,6 +1,10 @@
 # DesignerIA — Roadmap, V1 y primer análisis
 
+> **Punto de continuidad, 13 de octubre de 2026:** [Base consolidada y continuidad](DesignerIA-Checkpoint-Base-2026-10-13.md) contiene el estado vigente, pruebas, decisiones de interfaz y el siguiente caso real. El orden original de fases de este documento es histórico; no reabrir el formulario de plantilla ni el editor extenso dentro de un modal.
+
 Acuerdo del 10 de octubre de 2026. Leer primero `DesignerIA-Contexto.md` para entender el producto y su evidencia. Este documento establece orden, alcance y criterios de cierre.
+
+> **Cambio de dirección, 11 de octubre de 2026.** La creación pasa a hacerse desde un archivo JSONMetadata. La galería de plantillas, el formulario «Consulta con grilla», su endpoint y la vista previa simulada se retiraron del producto ese día. Las secciones 1 a 7 quedan como **registro histórico** de la V1 por plantilla: sus criterios, su flujo `Galería → plantilla → popup` y el orden de la fase 6 ya no son instrucciones vigentes. Leer primero `DesignerIA-JSONMetadata-Checkpoint.md`.
 
 ## 1. A dónde llegan las ocho fases
 
@@ -24,6 +28,22 @@ El plazo inicialmente planteado fue el jueves 15 de octubre de 2026 para demostr
 | **8. Edición** | Leer una vista compatible, modificarla y guardar | Se conservan estructura, configuración, relaciones y JS; los componentes no soportados se detectan antes de permitir editar |
 
 Estado al 10 de octubre de 2026: fases 1 y 2 cerradas; fase 3 cerrada funcionalmente en el ambiente local, con generación, pruebas y comprobación HTTP y visual reportadas en `DesignerIA-Fase03-Informe.md`. El script generado no se ejecutó: no hay metadata aplicada ni comprobación en Motor. Fases 4–8 no implementadas; el punto de partida de la fase 4 está en `DesignerIA-Fase04-Checkpoint.md`. La tabla de la sección 4 describe el código anterior a la fase 3. No confundir un script generado con una vista creada.
+
+**Estado al 11 de octubre de 2026.** Prevalece sobre el párrafo anterior, que se conserva como registro del día 10. El detalle y la evidencia están en `DesignerIA-Fase05-Checkpoint.md`.
+
+**Decisión del usuario, 11 de octubre de 2026:** acepta el cierre funcional de las fases 4 y 5 para el alcance probado y registra V1 como entregada con una reserva de validación integrada. Los criterios de cierre de la tabla anterior no se modifican y siguen siendo la referencia.
+
+- Fases 1–3: cerradas.
+- Fase 4: **cierre funcional aceptado.** Metadata local comprobada en seis casos. El script generado por DesignerIA se aplicó manualmente en desarrollo y la vista `vDesignerIATest01` se abrió en Designer y mostró su grilla con datos en Motor.
+- Fase 5: **cierre funcional aceptado.** Creación automática comprobada en el ambiente local desde la API y la Web; devolución de URL implementada; enlace «Abrir vista» validado con respuestas simuladas.
+- V1: **entregada, con reserva.**
+- Fases 6–8: sin desarrollar. Sólo se adelantó la vista previa simulada básica, por acuerdo explícito.
+
+**Alcance de la aceptación.** El criterio de la fase 5 pide crear y devolver IdVista y URL en un mismo recorrido. Ese recorrido no se ejecutó contra desarrollo: la creación automática se comprobó en un ambiente sin Motor, y la vista que Motor mostró se aplicó a mano. La aceptación cubre esas dos mitades por separado.
+
+**Reserva de validación integrada, pendiente.** Crear automáticamente con Motor configurado, recibir IdVista y URL reales y abrir la vista mediante «Abrir vista». No bloquea el cierre aceptado.
+
+La evidencia de la prueba manual son capturas y la URL que el usuario compartió en el chat; no está archivada en el repositorio. La regla «no declarar éxito por construir una URL» sigue vigente: la URL que devuelve DesignerIA todavía no se abrió en Motor.
 
 La fase 4 tiene dos checkpoints: **metadata local comprobada** y **Motor comprobado**. El primero permite avanzar en trabajo local, pero no cierra por sí solo la fase ni acredita funcionamiento del runtime.
 

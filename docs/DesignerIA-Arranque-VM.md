@@ -2,6 +2,8 @@
 
 Fecha: 11 de octubre de 2026.
 
+> **Nota posterior del mismo dia.** El formulario «Consulta con grilla» se retiro del producto. El paso de la seccion 4 que pide prepararla desde la Web ya no puede seguirse tal como esta escrito: la comprobacion integrada se rehara con la carga de JSONMetadata cuando exista. El resto de la guia (conexion, base de Motor, arranque) sigue vigente. Ver `DesignerIA-JSONMetadata-Checkpoint.md`.
+
 La creacion desde API/Web y la devolucion de URL estan implementadas. La creacion local fue comprobada; el usuario tambien aplico manualmente el script de `vDesignerIATest01` en `terardwhdb34 / GestionEngine`, abrio la vista en Designer y mostro su grilla en Motor SUR. Falta comprobar una creacion automatica en SUR y abrir el enlace real devuelto por DesignerIA para cerrar la fase 5 y V1. La grilla basica no incorpora el handler HTML de `vPruebaJFAL`.
 
 ## 1. Obtener el codigo actualizado
@@ -20,7 +22,7 @@ Debe aparecer un SDK `10.0.xxx`. No basta con tener solamente el runtime.
 Mientras el PR a main siga abierto, clonar la rama que contiene esta entrega en una carpeta nueva:
 
 ```powershell
-git clone --branch feature/create-view-executor https://github.com/jfal87/DesignerIA.git DesignerIA
+git clone --branch feature/publish-phase5 https://github.com/jfal87/DesignerIA.git DesignerIA
 ```
 
 Despues de integrar el PR, una clonacion nueva puede usar main:
@@ -105,6 +107,6 @@ La URL acordada tiene el patron `{baseMotor}/GestionEngine/DefaultV2.aspx?Limpia
 
 ## Evidencia y limites
 
-El checkpoint anterior esta en `docs/DesignerIA-Fase05-Checkpoint.md` y conserva el estado previo a la entrega de URL. Para la incorporacion de URL prevalece el estado explicado al principio de esta guia. La ultima entrega de implementacion reporto 732 pruebas unitarias sin SQL superadas y compilacion con 0 errores y 17 advertencias historicas. El enlace se verifico con respuestas simuladas; queda pendiente la comprobacion completa descrita arriba.
+El estado vigente esta en `docs/DesignerIA-Fase05-Checkpoint.md`, que ya incluye la entrega de URL; ese checkpoint prevalece sobre el resumen del principio de esta guia. La ultima entrega de implementacion reporto 732 pruebas unitarias sin SQL superadas y compilacion con 0 errores y 17 advertencias historicas. El enlace se verifico con respuestas simuladas; queda pendiente la comprobacion completa descrita arriba.
 
 La configuracion local, KnowledgeSource, indices generados, binarios y artifacts no se publican. La evidencia detallada disponible en el equipo de desarrollo queda en artifacts; puede faltar en la VM clonada. Los ejemplos comentados de este archivo no acreditan conectividad a SUR ni Norte.

@@ -1,0 +1,221 @@
+@using System.Text.Json.Nodes
+@using DesignerIA.Contracts
+
+@foreach (var field in Fields[Kind])
+{
+    var fieldPath = Path.Length == 0 ? field.Name : $"{Path}.{field.Name}";
+    var value = Node[field.Name];
+    <div class="jsonmeta-editor-field">
+        @if (field.Child is not null)
+        {
+            @if (value is JsonObject child && !field.IsList)
+            {
+                <details class="jsonmeta-editor-group" open>
+                    <summary>@field.Label</summary>
+                    <JsonMetadataNodeEditor Node="child" Kind="@field.Child" Path="@fieldPath" Editor="Editor" Disabled="Disabled" OnChanged="OnChanged" />
+                </details>
+            }
+            else if (value is JsonArray collection && field.IsList)
+            {
+                <details class="jsonmeta-editor-group" open>
+                    <summary>@field.Label (@collection.Count)</summary>
+                    @for (var index = 0; index < collection.Count; index++)
+                    {
+                        var itemIndex = index;
+                        var itemPath = $"{fieldPath}[{index}]";
+                        <div class="jsonmeta-editor-item" @key="collection[index]">
+                            <div class="jsonmeta-editor-item-heading">
+                                <strong>@field.Label · @(index + 1)</strong>
+                                <button type="button" class="jsonmeta-editor-link" @onclick="@(() => RemoveAsync(collection, itemIndex))">Quitar</button>
+                            </div>
+                            @if (collection[index] is JsonObject item)
+                            {
+                                <JsonMetadataNodeEditor Node="item" Kind="@field.Child" Path="@itemPath" Editor="Editor" Disabled="Disabled" OnChanged="OnChanged" />
+                            }
+                            else
+                            {
+                                <div class="jsonmeta-needed">Este elemento se conserva. Corrige su forma en JSON.</div>
+                                <pre class="jsonmeta-editor-preserved">@collection[index]?.ToJsonString()</pre>
+                            }
+                            @foreach (var diagnostic in DiagnosticsAt(itemPath))
+                            {
+                                <div class="jsonmeta-editor-diagnostic">@diagnostic.Cause @diagnostic.Needed</div>
+                            }
+                        </div>
+                    }
+                    <button type="button" class="modal-button-secondary" @onclick="@(() => AddAsync(collection, new JsonObject()))">Agregar elemento</button>
+                </details>
+            }
+            else if (value is null)
+            {
+                <div class="jsonmeta-editor-empty">
+                    <span>@field.Label @(Node.ContainsKey(field.Name) ? "· pendiente" : "· sin definir")</span>
+                    <button type="button" class="jsonmeta-editor-link" @onclick="@(() => SetAsync(field.Name, field.IsList ? new JsonArray() : new JsonObject()))">Definir</button>
+                </div>
+            }
+            else
+            {
+                <div class="jsonmeta-needed">@field.Label: el valor se conserva. Corrige su forma en JSON.</div>
+                <pre class="jsonmeta-editor-preserved">@value.ToJsonString()</pre>
+            }
+        }
+        else if (field.IsList)
+        {
+            <label class="modal-label">@field.Label</label>
+            @if (value is JsonArray references)
+            {
+                @for (var index = 0; index < references.Count; index++)
+                {
+                    var itemIndex = index;
+                    var itemPath = $"{fieldPath}[{index}]";
+                    <div class="jsonmeta-editor-reference">
+                        @if (references[index] is null || IsText(references[index]))
+                        {
+                            <input class="modal-input" aria-label="@($"{field.Label} {index + 1}")" value="@Text(references[index])"
+                                   @oninput="@(e => SetReferenceAsync(references, itemIndex, e.Value?.ToString() ?? string.Empty))" />
+                        }
+                        else
+                        {
+                            <code>@references[index]?.ToJsonString()</code>
+                        }
+                        <button type="button" class="jsonmeta-editor-link" @onclick="@(() => RemoveAsync(references, itemIndex))">Quitar</button>
+                    </div>
+                    @foreach (var diagnostic in DiagnosticsAt(itemPath))
+                    {
+                        <div class="jsonmeta-editor-diagnostic">@diagnostic.Cause @diagnostic.Needed</div>
+                    }
+                }
+                <button type="button" class="jsonmeta-editor-link" @onclick="@(() => AddAsync(references, JsonValue.Create(string.Empty)))">Agregar referencia</button>
+            }
+            else if (value is null)
+            {
+                <button type="button" class="jsonmeta-editor-link" @onclick="@(() => SetAsync(field.Name, new JsonArray()))">Definir referencias</button>
+            }
+            else
+            {
+                <pre class="jsonmeta-editor-preserved">@value.ToJsonString()</pre>
+            }
+        }
+        else
+        {
+            <label class="modal-label" for="@fieldPath">@field.Label</label>
+            @if (value is not null && !(field.IsFlag ? IsFlag(value) : IsText(value)))
+            {
+                <div class="jsonmeta-needed">El valor se conserva. Corrige su tipo en JSON.</div>
+                <pre class="jsonmeta-editor-preserved">@value.ToJsonString()</pre>
+            }
+            else if (field.Options is not null || field.IsFlag)
+            {
+                var selected = field.IsFlag ? Flag(value) : Text(value);
+                var options = field.IsFlag ? new[] { "false", "true" } : field.Options!;
+                <select id="@fieldPath" class="modal-input" value="@selected" @onchange="@(e => SelectAsync(field, e.Value?.ToString() ?? string.Empty))">
+                    <option value="">@(Node.ContainsKey(field.Name) ? "Pendiente" : "Sin definir")</option>
+                    @if (selected.Length > 0 && !options.Contains(selected))
+                    {
+                        <option value="@selected">@selected (conservado)</option>
+                    }
+                    @foreach (var option in options)
+                    {
+                        <option value="@option">@(field.IsFlag ? option == "true" ? "Sí" : "No" : option)</option>
+                    }
+                </select>
+            }
+            else
+            {
+                <input id="@fieldPath" class="modal-input" value="@Text(value)" placeholder="@(Node.ContainsKey(field.Name) ? "Pendiente" : "Sin definir")"
+                       @oninput="@(e => SetAsync(field.Name, JsonValue.Create(e.Value?.ToString() ?? string.Empty)))" />
+            }
+        }
+        @foreach (var diagnostic in DiagnosticsAt(fieldPath))
+        {
+            <div class="jsonmeta-editor-diagnostic">@diagnostic.Cause @diagnostic.Needed</div>
+        }
+    </div>
+}
+
+@foreach (var property in Node.Where(property => !Fields[Kind].Any(field => field.Name == property.Key)))
+{
+    <details class="jsonmeta-editor-group jsonmeta-editor-unknown">
+        <summary>@property.Key · conservado en el documento</summary>
+        <div class="jsonmeta-needed">Esta propiedad se mantiene. La validación indicará si está admitida. Puedes editarla en JSON.</div>
+        <pre class="jsonmeta-editor-preserved">@property.Value?.ToJsonString()</pre>
+    </details>
+}
+
+@code {
+    [Parameter, EditorRequired] public JsonObject Node { get; set; } = null!;
+    [Parameter, EditorRequired] public string Kind { get; set; } = "document";
+    [Parameter] public string Path { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public JsonMetadataEditingState Editor { get; set; } = null!;
+    [Parameter] public EventCallback OnChanged { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+
+    // Presentation vocabulary only; support, references and conventions are validated by the API.
+    private sealed record Field(string Name, string Label, string? Child = null, bool IsList = false,
+        bool IsFlag = false, string[]? Options = null);
+
+    private static readonly Dictionary<string, Field[]> Fields = new()
+    {
+        ["document"] = [new("schemaVersion", "Versión del documento", Options: ["1.0"]), new("view", "Vista", "view"),
+            new("states", "Estados", "state", true), new("controls", "Controles", "control", true)],
+        ["view"] = [new("id", "Identificador de vista"), new("description", "Descripción"),
+            new("type", "Tipo de vista", Options: ["site", "go"]), new("usesSecurity", "Usa seguridad", IsFlag: true)],
+        ["state"] = [new("name", "Nombre del estado"), new("isDefault", "Estado inicial", IsFlag: true),
+            new("controls", "Controles activos", IsList: true), new("rows", "Filas", "row", true)],
+        ["row"] = [new("areas", "Áreas", "area", true)],
+        ["area"] = [new("name", "Nombre del área"), new("object", "Objeto del área", "object")],
+        ["object"] = [new("type", "Tipo de objeto", Options: ["grid"]), new("data", "Datos", "data")],
+        ["data"] = [new("connection", "Alias de conexión"), new("storedProcedure", "Stored Procedure"),
+            new("parameters", "Parámetros", "parameter", true)],
+        ["parameter"] = [new("name", "Nombre del parámetro"), new("default", "Valor fijo"), new("source", "Origen del valor", "source")],
+        ["source"] = [new("kind", "Tipo de origen", Options: ["fixed"]), new("name", "Nombre de la fuente")],
+        ["control"] = [new("name", "Nombre del control"), new("type", "Tipo de control", Options: ["buttonList"]),
+            new("items", "Opciones", "item", true), new("actions", "Acciones", "action", true)],
+        ["item"] = [new("text", "Texto de la opción"), new("value", "Valor de la opción")],
+        ["action"] = [new("name", "Acción", Options: ["cambiarEstado"]), new("parameters", "Estados destino", IsList: true)]
+    };
+
+    private static bool IsText(JsonNode? value) => value is JsonValue scalar && scalar.TryGetValue<string>(out _);
+    private static bool IsFlag(JsonNode? value) => value is JsonValue scalar && scalar.TryGetValue<bool>(out _);
+    private static string Text(JsonNode? value) => value is JsonValue scalar && scalar.TryGetValue<string>(out var text) ? text : string.Empty;
+    private static string Flag(JsonNode? value) => value is JsonValue scalar && scalar.TryGetValue<bool>(out var flag) ? flag ? "true" : "false" : string.Empty;
+    private IEnumerable<JsonMetadataDiagnostic> DiagnosticsAt(string path) =>
+        Editor.Draft?.Diagnostics.Where(diagnostic => diagnostic.Path == path) ?? [];
+
+    private async Task SetAsync(string name, JsonNode? value)
+    {
+        if (Disabled) { return; }
+        Node[name] = value;
+        await ChangedAsync();
+    }
+
+    private Task SelectAsync(Field field, string value) => SetAsync(field.Name,
+        value.Length == 0 ? null : field.IsFlag ? JsonValue.Create(value == "true") : JsonValue.Create(value));
+
+    private async Task SetReferenceAsync(JsonArray collection, int index, string value)
+    {
+        if (Disabled) { return; }
+        collection[index] = JsonValue.Create(value);
+        await ChangedAsync();
+    }
+
+    private async Task AddAsync(JsonArray collection, JsonNode? value)
+    {
+        if (Disabled) { return; }
+        collection.Add(value);
+        await ChangedAsync();
+    }
+
+    private async Task RemoveAsync(JsonArray collection, int index)
+    {
+        if (Disabled) { return; }
+        collection.RemoveAt(index);
+        await ChangedAsync();
+    }
+
+    private async Task ChangedAsync()
+    {
+        Editor.CommitFields();
+        await OnChanged.InvokeAsync();
+    }
+}

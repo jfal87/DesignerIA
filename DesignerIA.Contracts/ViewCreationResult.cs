@@ -43,4 +43,5 @@ public record ViewCreationResult(
     string Message,
     IReadOnlyList<ViewScriptGenerationGap> Gaps,
     IReadOnlyList<string> Diagnostics,
-    string? ViewUrl = null);
+    string? ViewUrl = null,
+    bool ViewUrlIsMock = false);

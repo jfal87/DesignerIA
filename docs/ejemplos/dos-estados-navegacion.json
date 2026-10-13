@@ -1,0 +1,61 @@
+{
+  "schemaVersion": "1.0",
+  "view": { "id": "vDesignerIA_13102026", "type": "go" },
+  "controls": [
+    {
+      "name": "wcIrDetalle",
+      "type": "buttonList",
+      "items": [ { "text": "Ir a detalle", "value": "detalle" } ],
+      "actions": [ { "name": "cambiarEstado", "parameters": [ "Detalle" ] } ]
+    },
+    {
+      "name": "wcVolver",
+      "type": "buttonList",
+      "items": [ { "text": "Volver", "value": "volver" } ],
+      "actions": [ { "name": "cambiarEstado", "parameters": [ "Principal" ] } ]
+    }
+  ],
+  "states": [
+    {
+      "name": "Principal",
+      "isDefault": true,
+      "controls": [ "wcIrDetalle" ],
+      "rows": [
+        {
+          "areas": [
+            {
+              "name": "AreaPrincipal",
+              "object": {
+                "type": "grid",
+                "data": {
+                  "connection": "GestionEngine",
+                  "storedProcedure": "dbo.PRC_GET_GRID_TEST_SORT_COLUMN"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Detalle",
+      "controls": [ "wcVolver" ],
+      "rows": [
+        {
+          "areas": [
+            {
+              "name": "AreaDetalle",
+              "object": {
+                "type": "grid",
+                "data": {
+                  "connection": "GestionEngine",
+                  "storedProcedure": "dbo.PRC_GET_GRID_TEST_SORT_COLUMN"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

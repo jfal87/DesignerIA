@@ -1,0 +1,451 @@
+@inject HttpClient Http
+@inject IJSRuntime JS
+@using System.Net
+@using System.Text.Json
+@using System.Text.Json.Serialization
+@using DesignerIA.Contracts
+
+<div class="jsonmeta-workspace @(_ampliado ? "jsonmeta-workspace-expanded" : null)">
+    <header class="jsonmeta-workspace-heading">
+        <div>
+            <h1 tabindex="-1" @ref="_titulo">@ViewTitle</h1>
+            <div class="jsonmeta-workspace-caption">@FileName · @(_edicion.CanCreate ? "Validado para crear" : "Borrador pendiente de validar")</div>
+        </div>
+        <div class="jsonmeta-workspace-tools">
+            <button type="button" class="modal-button-secondary" disabled="@Ocupado" @onclick="OnLoadFile">Cargar otro archivo</button>
+            <button type="button" class="modal-button-secondary" disabled="@Ocupado" @onclick="GuardarJsonAsync">Guardar JSON</button>
+            <button type="button" class="modal-button-secondary" disabled="@_ampliado" aria-pressed="@(AssistantVisible ? "true" : "false")" @onclick="OnToggleAssistant">@(AssistantVisible ? "Ocultar conversación" : "Abrir conversación")</button>
+        </div>
+    </header>
+
+    <div class="jsonmeta-workspace-tabs" role="group" aria-label="Secciones del borrador">
+        <button type="button" class="modal-button-secondary" aria-pressed="@(_pestana == EditorTab.Structure ? "true" : "false")" disabled="@(_edicion.Document is null)" @onclick="@(() => CambiarSeccionAsync(EditorTab.Structure))">Estructura</button>
+        <button type="button" class="modal-button-secondary" aria-pressed="@(_pestana == EditorTab.JavaScript ? "true" : "false")" @onclick="@(() => CambiarSeccionAsync(EditorTab.JavaScript))">JavaScript</button>
+        <button type="button" class="modal-button-secondary" aria-pressed="@(_pestana == EditorTab.Review ? "true" : "false")" @onclick="@(() => CambiarSeccionAsync(EditorTab.Review))">Revisión y SQL</button>
+        <button type="button" class="modal-button-secondary" aria-pressed="@(_pestana == EditorTab.Json ? "true" : "false")" @onclick="@(() => CambiarSeccionAsync(EditorTab.Json))">JSON</button>
+    </div>
+
+    <div class="jsonmeta-workspace-body">
+        @if (_mensaje is not null)
+        {
+            <div class="modal-message" role="status">@_mensaje</div>
+        }
+        @if (_edicion.ReadingError is { } readingError)
+        {
+            <div class="jsonmeta-editor-diagnostic" role="alert">@readingError</div>
+        }
+        @if (_pestana == EditorTab.Structure && _edicion.Document is { } document)
+        {
+            <fieldset class="jsonmeta-editor" disabled="@Ocupado">
+                <legend>Definición de la vista</legend>
+                <JsonMetadataNodeEditor Node="document" Kind="document" Editor="_edicion" Disabled="Ocupado" OnChanged="InvalidarVista" />
+            </fieldset>
+        }
+        else if (_pestana == EditorTab.Json)
+        {
+            <label class="modal-label" for="jsonmeta-workspace-json">Definición JSONMetadata</label>
+            <textarea id="jsonmeta-workspace-json" class="modal-textarea jsonmeta-editor-json" disabled="@Ocupado" spellcheck="false" @bind="TextoEdicion" @bind:event="oninput"></textarea>
+        }
+        else if (_pestana == EditorTab.JavaScript)
+        {
+            <div class="jsonmeta-code-heading">
+                <h2>JavaScript de la vista</h2>
+                <button type="button" class="modal-button-secondary" @onclick="AlternarAmpliacionAsync">@(_ampliado ? "Volver al editor" : "Ampliar editor")</button>
+            </div>
+            @if (_edicion.CanEditJavaScript)
+            {
+                <div class="jsonmeta-code-tools">
+                    <label class="modal-label">Ir a función
+                        <select class="modal-input" @onchange="IrAFuncionAsync">
+                            <option value="">Seleccionar función</option>
+                            @foreach (var function in Funciones)
+                            {
+                                <option value="@function">@function</option>
+                            }
+                        </select>
+                    </label>
+                    <span class="jsonmeta-needed">@Funciones.Count() funciones encontradas</span>
+                </div>
+                <label class="modal-label" for="jsonmeta-workspace-js">Código JavaScript</label>
+                <textarea id="jsonmeta-workspace-js" class="modal-textarea jsonmeta-code-editor" @ref="_codigoEditor" disabled="@Ocupado" spellcheck="false" placeholder="La vista todavía no tiene JavaScript." @bind="CodigoJavascript" @bind:event="oninput"></textarea>
+                <div class="jsonmeta-needed">El código se incluirá en el script de creación. Valida el borrador para revisar el SQL actualizado; GestionEngine ejecutará el JS al cargar la vista.</div>
+            }
+            else
+            {
+                <div class="modal-message">Completa el objeto Vista en Estructura. Si el JS tiene otra forma, su contenido se conserva y puedes corregirlo desde JSON.</div>
+                <button type="button" class="modal-button-secondary" @onclick="@(() => CambiarSeccionAsync(EditorTab.Json))">Ver JSON</button>
+            }
+        }
+        else if (_pestana == EditorTab.Review)
+        {
+                        @if (_borrador is not null)
+            {
+                <div class="jsonmeta-summary @(_borrador.CanCreate ? "jsonmeta-summary-ok" : "jsonmeta-summary-pending")" role="status">
+                    @if (_borrador.CanCreate)
+                    {
+                        <span>Vista «@_borrador.ViewId»: documento completo. Revisa la definición efectiva antes de crear.</span>
+                    }
+                    else
+                    {
+                        <span>@(string.IsNullOrWhiteSpace(_borrador.ViewId) ? "El documento" : $"Vista «{_borrador.ViewId}»") no se puede crear todavía: @Resumen(_borrador.Diagnostics).</span>
+                    }
+                </div>
+
+                @if (_borrador.Diagnostics.Count > 0)
+                {
+                    <div class="jsonmeta-section-title">Qué falta o hay que corregir</div>
+                    <ul class="jsonmeta-list">
+                        @foreach (var diagnostico in _borrador.Diagnostics)
+                        {
+                            <li>
+                                <span class="jsonmeta-badge @ClaseSeveridad(diagnostico.Severity)">@EtiquetaSeveridad(diagnostico.Severity)</span>
+                                <code class="jsonmeta-path">@(diagnostico.Path.Length == 0 ? "(documento)" : diagnostico.Path)</code>
+                                <div>@diagnostico.Cause</div>
+                                <div class="jsonmeta-needed">Necesario: @diagnostico.Needed</div>
+                            </li>
+                        }
+                    </ul>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(_borrador.Script))
+                {
+                    <section class="jsonmeta-script" aria-label="Script de creación">
+                        <div class="jsonmeta-section-title">Script de creación</div>
+                        <div class="viewscript-status-ok">Script generado. No ejecutado. Puedes copiarlo para probarlo en GestionEngine.</div>
+                        <button type="button" class="viewscript-copy-button" @onclick="CopiarScriptAsync">Copiar script</button>
+                        @if (_mensajeScript is not null)
+                        {
+                            <div class="jsonmeta-needed" role="status">@_mensajeScript</div>
+                        }
+                        <pre class="viewscript-code jsonmeta-document" tabindex="0">@_borrador.Script</pre>
+                    </section>
+                }
+
+                @if (_borrador.Annotations.Count > 0)
+                {
+                    <div class="jsonmeta-section-title">De dónde sale cada dato</div>
+                    <ul class="jsonmeta-list">
+                        @foreach (var anotacion in _borrador.Annotations.Where(anotacion => anotacion.Origin != JsonMetadataOrigin.Recibido))
+                        {
+                            <li>
+                                <span class="jsonmeta-badge @ClaseOrigen(anotacion.Origin)">@EtiquetaOrigen(anotacion.Origin)</span>
+                                <code class="jsonmeta-path">@anotacion.Path</code>
+                                <div>@anotacion.Note</div>
+                            </li>
+                        }
+                    </ul>
+                    <details class="viewcreation-diagnostics">
+                        <summary>Recibido tal como se escribió (@_borrador.Annotations.Count(anotacion => anotacion.Origin == JsonMetadataOrigin.Recibido))</summary>
+                        <div class="jsonmeta-received">
+                            @string.Join(", ", _borrador.Annotations.Where(anotacion => anotacion.Origin == JsonMetadataOrigin.Recibido).Select(anotacion => anotacion.Path))
+                        </div>
+                    </details>
+                }
+
+            }
+
+            @if (_borrador is null)
+            {
+                <div class="modal-message">Valida el borrador para ver lo que falta y obtener el script de creación.</div>
+            }
+        }
+    </div>
+
+    @if (_confirmando && _borrador is { } confirmed)
+    {
+        <div class="viewcreation-confirm" role="group" aria-label="Confirmar creación de la vista">
+            <div>Se creará la vista «@confirmed.ViewId» en la base de metadata configurada. DesignerIA no puede deshacerla.</div>
+            <div>Para probar el script manualmente en otro ambiente, usa «Copiar script».</div>
+            <div class="viewspec-actions">
+                <button type="button" class="viewspec-action" disabled="@Ocupado" @onclick="CrearAsync">@(_creando ? "Creando..." : "Confirmar creación")</button>
+                <button type="button" class="viewspec-action" disabled="@Ocupado" @onclick="@(() => _confirmando = false)">Cancelar</button>
+            </div>
+        </div>
+    }
+    <footer class="jsonmeta-workspace-actions">
+        <span class="jsonmeta-needed">@(_edicion.CanCreate ? "Revisa la definición antes de crear." : "Los cambios necesitan validación.")</span>
+        <div class="jsonmeta-workspace-tools">
+            <button type="button" class="modal-button-secondary" disabled="@(Ocupado || _contenido is null)" @onclick="PrepararAsync">@(_preparando ? "Validando..." : "Validar y generar script")</button>
+            <button type="button" class="modal-button-primary" disabled="@(Ocupado || _confirmando || !_edicion.CanCreate)" @onclick="SolicitarCreacion">Crear vista</button>
+        </div>
+    </footer>
+</div>
+
+@code {
+    private static readonly JsonSerializerOptions OpcionesJson = CrearOpcionesJson();
+
+    [Parameter, EditorRequired] public JsonMetadataEditingState Editor { get; set; } = null!;
+    [Parameter] public string? FileName { get; set; }
+    [Parameter] public bool IsActive { get; set; }
+    [Parameter] public bool AssistantVisible { get; set; }
+    [Parameter] public EventCallback OnLoadFile { get; set; }
+    [Parameter] public EventCallback OnToggleAssistant { get; set; }
+    [Parameter] public EventCallback<bool> OnExpandedChanged { get; set; }
+    [Parameter] public EventCallback<bool> OnBusyChanged { get; set; }
+
+    /// <summary>
+    /// Se invoca cuando termina una solicitud de creación: identificador, resultado de la API
+    /// (null si no llegó respuesta) y detalle de lo ocurrido en ese caso.
+    /// </summary>
+    [Parameter]
+    public EventCallback<(string? ViewId, ViewCreationResult? Result, string? Detail, string? Script)> OnCreationFinished { get; set; }
+
+    private JsonMetadataEditingState _edicion => Editor;
+    private string? _contenido => _edicion.Content;
+    private string? _mensaje;
+    private string? _mensajeScript;
+    private JsonMetadataDraft? _borrador => _edicion.Draft;
+    private enum EditorTab { Structure, JavaScript, Review, Json }
+    private EditorTab _pestana;
+    private bool _ampliado;
+    private JsonMetadataEditingState? _anteriorEditor;
+    private ElementReference _codigoEditor;
+    private ElementReference _titulo;
+    private bool _enfocarTitulo;
+
+    private bool _preparando;
+    private bool _confirmando;
+    private bool _creando;
+
+    private bool Ocupado => _preparando || _creando;
+
+    private string TextoEdicion
+    {
+        get => _contenido ?? string.Empty;
+        set
+        {
+            if (Ocupado) { return; }
+            _edicion.EditText(value);
+            InvalidarVista();
+        }
+    }
+
+    private void InvalidarVista()
+    {
+        _confirmando = false;
+        _mensajeScript = null;
+        _mensaje = "Borrador modificado. Valídalo de nuevo para revisar los cambios y poder crear.";
+    }
+
+    private async Task PrepararAsync()
+    {
+        if (_contenido is null || Ocupado)
+        {
+            return;
+        }
+        _preparando = true;
+        await CambiarSeccionAsync(EditorTab.Review);
+        await OnBusyChanged.InvokeAsync(true);
+        _confirmando = false;
+        _edicion.DiscardPreparation();
+        _mensaje = null;
+        _mensajeScript = null;
+        var revision = _edicion.Revision;
+        try
+        {
+            var respuesta = await Http.PostAsJsonAsync("api/view-json/prepare", new JsonMetadataRequest(_contenido));
+            var borrador = respuesta.IsSuccessStatusCode
+                ? await respuesta.Content.ReadFromJsonAsync<JsonMetadataDraft>(OpcionesJson)
+                : null;
+            if (borrador is null)
+            {
+                _mensaje = $"No se pudo preparar el documento (la API respondió {(int)respuesta.StatusCode}).";
+            }
+            else
+            {
+                _edicion.ApplyPreparation(revision, borrador);
+            }
+        }
+        catch (Exception excepcion) when (excepcion is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            _mensaje = "No se pudo contactar a la Api.";
+        }
+        finally
+        {
+            _preparando = false;
+            await OnBusyChanged.InvokeAsync(false);
+        }
+    }
+
+    private void SolicitarCreacion()
+    {
+        if (_edicion.CanCreate && !Ocupado) { _confirmando = true; }
+    }
+
+    // Viaja la definición efectiva que el usuario revisó; la API la vuelve a leer y validar.
+    private async Task CrearAsync()
+    {
+        if (!_edicion.CanCreate || !_confirmando || Ocupado
+            || _borrador is not { EffectiveDocument: { } documento } borrador)
+        {
+            return;
+        }
+        _creando = true;
+        await OnBusyChanged.InvokeAsync(true);
+        ViewCreationResult? resultado = null;
+        string? detalle = null;
+        try
+        {
+            var respuesta = await Http.PostAsJsonAsync("api/view-json/create", new JsonMetadataRequest(documento));
+            if (respuesta.StatusCode is HttpStatusCode.OK or HttpStatusCode.Forbidden or HttpStatusCode.Conflict)
+            {
+                resultado = await respuesta.Content.ReadFromJsonAsync<ViewCreationResult>(OpcionesJson);
+            }
+            detalle = resultado is null ? $"La API respondió {(int)respuesta.StatusCode}." : null;
+        }
+        catch (Exception excepcion)
+        {
+            detalle = $"No se recibió la respuesta de la API ({excepcion.GetType().Name}).";
+        }
+        finally
+        {
+            _creando = false;
+            _confirmando = false;
+            await OnBusyChanged.InvokeAsync(false);
+        }
+        if (resultado is null || resultado.Status is ViewCreationStatus.Created or ViewCreationStatus.Indeterminate)
+        {
+            _edicion.DiscardPreparation();
+        }
+        await OnCreationFinished.InvokeAsync((borrador.ViewId, resultado, detalle, borrador.Script));
+    }
+
+    private async Task CopiarScriptAsync()
+    {
+        if (_borrador?.Script is { Length: > 0 } script)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("navigator.clipboard.writeText", script);
+                _mensajeScript = "Script copiado. Aún no se ha ejecutado.";
+            }
+            catch (JSException)
+            {
+                _mensajeScript = "No se pudo copiar automáticamente. Selecciona el script y cópialo manualmente.";
+            }
+        }
+    }
+
+    private static string Resumen(IReadOnlyList<JsonMetadataDiagnostic> diagnosticos)
+    {
+        var partes = new List<string>();
+        Agregar(JsonMetadataSeverity.Error, "por corregir");
+        Agregar(JsonMetadataSeverity.Pendiente, "por completar");
+        Agregar(JsonMetadataSeverity.NoSoportado, "sin soporte en esta versión");
+        return string.Join(", ", partes);
+
+        void Agregar(JsonMetadataSeverity severidad, string texto)
+        {
+            var cantidad = diagnosticos.Count(diagnostico => diagnostico.Severity == severidad);
+            if (cantidad > 0)
+            {
+                partes.Add($"{cantidad} {texto}");
+            }
+        }
+    }
+
+    private static string EtiquetaSeveridad(JsonMetadataSeverity severidad) => severidad switch
+    {
+        JsonMetadataSeverity.Error => "Corregir",
+        JsonMetadataSeverity.Pendiente => "Falta",
+        _ => "Sin soporte"
+    };
+
+    private static string ClaseSeveridad(JsonMetadataSeverity severidad) => severidad switch
+    {
+        JsonMetadataSeverity.Error => "jsonmeta-badge-error",
+        JsonMetadataSeverity.Pendiente => "jsonmeta-badge-warning",
+        _ => "jsonmeta-badge-muted"
+    };
+
+    private static string EtiquetaOrigen(JsonMetadataOrigin origen) => origen switch
+    {
+        JsonMetadataOrigin.Default => "Completado",
+        JsonMetadataOrigin.Derivado => "Derivado",
+        JsonMetadataOrigin.Catalogo => "Catálogo",
+        _ => "Recibido"
+    };
+
+    private static string ClaseOrigen(JsonMetadataOrigin origen) =>
+        origen == JsonMetadataOrigin.Catalogo ? "jsonmeta-badge-ok" : "jsonmeta-badge-muted";
+
+    private static JsonSerializerOptions CrearOpcionesJson()
+    {
+        var opciones = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        opciones.Converters.Add(new JsonStringEnumConverter());
+        return opciones;
+    }
+
+    private string ViewTitle => _edicion.Document?["view"] is System.Text.Json.Nodes.JsonObject view
+        && view["id"] is System.Text.Json.Nodes.JsonValue value && value.TryGetValue<string>(out var name)
+        && !string.IsNullOrWhiteSpace(name) ? name : "Preparar vista";
+
+    private string CodigoJavascript
+    {
+        get => _edicion.JavaScript;
+        set { if (!Ocupado) { _edicion.EditJavaScript(value); InvalidarVista(); } }
+    }
+
+    private IEnumerable<string> Funciones => System.Text.RegularExpressions.Regex.Matches(CodigoJavascript,
+        @"\bfunction\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(").Select(match => match.Groups[1].Value).Distinct(StringComparer.Ordinal);
+
+    protected override void OnParametersSet()
+    {
+        if (!ReferenceEquals(_anteriorEditor, Editor))
+        {
+            _anteriorEditor = Editor;
+            _ampliado = false;
+            _pestana = Editor.Document is null ? EditorTab.Json : EditorTab.Structure;
+            _mensaje = null;
+            _mensajeScript = null;
+            _confirmando = false;
+            _enfocarTitulo = true;
+        }
+        if (!IsActive) { _confirmando = false; _ampliado = false; }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_enfocarTitulo && IsActive)
+        {
+            _enfocarTitulo = false;
+            await JS.InvokeVoidAsync("designeriaDraft.focus", _titulo);
+        }
+    }
+
+    private async Task CambiarSeccionAsync(EditorTab section)
+    {
+        _pestana = section;
+        if (_ampliado && section != EditorTab.JavaScript)
+        {
+            _ampliado = false;
+            await OnExpandedChanged.InvokeAsync(false);
+        }
+    }
+
+    private async Task AlternarAmpliacionAsync()
+    {
+        _ampliado = !_ampliado;
+        await OnExpandedChanged.InvokeAsync(_ampliado);
+    }
+
+    private async Task IrAFuncionAsync(ChangeEventArgs e)
+    {
+        var name = e.Value?.ToString();
+        if (string.IsNullOrEmpty(name)) { return; }
+        var match = System.Text.RegularExpressions.Regex.Match(CodigoJavascript,
+            @"\bfunction\s+" + System.Text.RegularExpressions.Regex.Escape(name) + @"\s*\(");
+        if (match.Success) { await JS.InvokeVoidAsync("designeriaDraft.selectFunction", _codigoEditor, match.Index, match.Length - 1); }
+    }
+
+    private async Task GuardarJsonAsync()
+    {
+        if (_contenido is null || Ocupado) { return; }
+        try
+        {
+            await JS.InvokeVoidAsync("designeriaDraft.saveJson", _contenido, ViewTitle);
+            _mensaje = "Descarga del borrador iniciada.";
+        }
+        catch (JSException) { _mensaje = "No se pudo descargar el borrador. Puedes copiar su contenido desde JSON."; }
+    }
+}

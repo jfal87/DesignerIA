@@ -128,7 +128,9 @@ public sealed class ViewCreationTests
         Assert.Equal(0, empty["Areas"]);
         Assert.Equal(0, empty["LeftMenus"]);
         Assert.Equal(1, empty["ConfiguracionesEstados"]);
-        Assert.All(grid.Values, count => Assert.Equal(1, count));
+        Assert.Equal(0, grid["ParametrosSP"]);
+        Assert.Equal(0, grid["MapeoParametros"]);
+        Assert.All(grid.Where(count => count.Key is not ("ParametrosSP" or "MapeoParametros")), count => Assert.Equal(1, count.Value));
     }
 
     [Fact]
@@ -185,6 +187,7 @@ public sealed class ViewCreationTests
 
         Assert.DoesNotMatch(pattern, ViewCreationVerifier.CountsSql);
         Assert.DoesNotMatch(pattern, ViewCreationVerifier.ValuesSql);
+        Assert.DoesNotMatch(pattern, ViewCreationVerifier.ParametersSql);
     }
 
     [Fact]
@@ -443,6 +446,19 @@ public sealed class ViewCreationTests
     }
 
     [Fact]
+    public void MockMotorLinkDoesNotPretendToOpenTheLocalDatabase()
+    {
+        var plan = GridPlan();
+        var result = ViewCreationService.Decide(plan, AuditUser, Completed(), MatchingSnapshot(plan), "https://desagestion.ternium.net", motorIsMock: true);
+        Assert.Equal(ViewCreationStatus.Created, result.Status);
+        Assert.NotNull(result.ViewUrl);
+        Assert.True(result.ViewUrlIsMock);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Contains("mock"));
+        var withoutUrl = ViewCreationService.Decide(plan, AuditUser, Completed(), MatchingSnapshot(plan), motorIsMock: true);
+        Assert.False(withoutUrl.ViewUrlIsMock);
+    }
+
+    [Fact]
     public void CreatedResultKeepsTheViewIdWithoutUrlWhenTheMotorBaseIsMissing()
     {
         var plan = GridPlan();
@@ -487,6 +503,199 @@ public sealed class ViewCreationTests
         Assert.Contains(results, result => result.Status == ViewCreationStatus.Indeterminate);
     }
 
+    [Fact]
+    public void FixedParametersAddTwoRecordsEachAndMatchingVerificationIsCreated()
+    {
+        var plan = ParameterPlan();
+        var counts = ViewCreationVerifier.ExpectedCounts(plan);
+
+        Assert.Equal(2, counts["ParametrosSP"]);
+        Assert.Equal(2, counts["MapeoParametros"]);
+        Assert.Equal(14, CreatedRecords(counts));
+        var result = ViewCreationService.Decide(plan, AuditUser, Completed(), MatchingSnapshot(plan));
+        Assert.Equal(ViewCreationStatus.Created, result.Status);
+        Assert.Contains(result.Diagnostics, line => line.Contains("Verificados 14 registros"));
+    }
+
+    [Fact]
+    public void ExpectedParameterAndMappingRowsComeFromThePlanAndAreReadByTheThirdQuery()
+    {
+        var plan = ParameterPlan();
+        var parameters = ViewCreationVerifier.ExpectedParameterRows(plan, AuditUser);
+        var mappings = ViewCreationVerifier.ExpectedMappingRows(plan, AuditUser);
+
+        Assert.Equal(new[] { "ParamUno", "ParamDos" }, parameters.Select(row => row["Nombre"]).ToArray());
+        Assert.Equal(new[] { "ParamUno", "ParamDos" }, mappings.Select(row => row["Parametro"]).ToArray());
+        Assert.Equal(new Dictionary<string, string?>
+        {
+            ["Nombre"] = "ParamUno", ["UsaComillas"] = "1", ["EsMyVision"] = "0", ["TipoParametro"] = "varchar",
+            ["User_Create"] = AuditUser, ["User_Update"] = null, ["F_Create informada"] = "1", ["F_Update informada"] = "0"
+        }, parameters[0]);
+        Assert.Equal(new Dictionary<string, string?>
+        {
+            ["Estado de la vista"] = "1", ["SP de la vista"] = "1", ["NombreArea"] = "Area01", ["Parametro"] = "ParamDos",
+            ["Variable"] = "", ["ValorDefault"] = "FIJO-DOS-61", ["VariableRequest"] = "",
+            ["User_Create"] = AuditUser, ["User_Update"] = null, ["F_Create informada"] = "1", ["F_Update informada"] = "0"
+        }, mappings[1]);
+        foreach (var name in parameters[0].Keys.Concat(mappings[0].Keys))
+        {
+            Assert.Contains($"AS [{name}]", ViewCreationVerifier.ParametersSql);
+        }
+        // Dos conjuntos completos: los mapeos se leen por estado o por SP, sin filtrar por nombre, área ni valor.
+        Assert.Matches(@"FROM dbo\.ParametrosSP p\s+WHERE p\.IdStoredProcedure IN \(SELECT IdStoredProcedure FROM S\)\s+ORDER BY", ViewCreationVerifier.ParametersSql);
+        Assert.Matches(@"FROM dbo\.MapeoParametros m\s+WHERE m\.IdEstado IN \(SELECT IdEstado FROM E\)\s+OR m\.IdStoredProcedure IN \(SELECT IdStoredProcedure FROM S\)\s+ORDER BY", ViewCreationVerifier.ParametersSql);
+        Assert.DoesNotContain("@alias", ViewCreationVerifier.ParametersSql);
+        Assert.Empty(ViewCreationVerifier.ExpectedParameterRows(GridPlan(), AuditUser));
+        Assert.Empty(ViewCreationVerifier.ExpectedMappingRows(GridPlan(), AuditUser));
+    }
+
+    [Theory]
+    [InlineData("parameter-missing")]
+    [InlineData("parameter-extra")]
+    [InlineData("parameter-duplicate")]
+    [InlineData("parameter-case")]
+    [InlineData("parameter-type")]
+    [InlineData("parameter-type-null")]
+    [InlineData("parameter-quotes")]
+    [InlineData("parameter-myvision")]
+    [InlineData("parameter-myvision-null")]
+    [InlineData("parameter-audit-user")]
+    [InlineData("parameter-user-update-empty")]
+    [InlineData("parameter-date-missing")]
+    [InlineData("parameter-order")]
+    [InlineData("mapping-missing")]
+    [InlineData("mapping-extra")]
+    [InlineData("mapping-duplicate")]
+    [InlineData("mapping-duplicate-other-sp")]
+    [InlineData("mapping-other-sp")]
+    [InlineData("mapping-other-state")]
+    [InlineData("mapping-other-area")]
+    [InlineData("mapping-variable")]
+    [InlineData("mapping-variable-null")]
+    [InlineData("mapping-request-null")]
+    [InlineData("mapping-value-trailing-space")]
+    [InlineData("mapping-value-case")]
+    [InlineData("mapping-value-empty")]
+    [InlineData("mapping-value-null")]
+    [InlineData("mapping-user-update-empty")]
+    [InlineData("mapping-order")]
+    [InlineData("nothing-read")]
+    public void EveryParameterOrMappingDefectIsReportedAndNeverCreated(string defect)
+    {
+        var plan = ParameterPlan();
+        var snapshot = MatchingSnapshot(plan);
+        var parameters = snapshot.ParameterRows!.Select(row => new Dictionary<string, string?>(row)).ToList();
+        var mappings = snapshot.MappingRows!.Select(row => new Dictionary<string, string?>(row)).ToList();
+        switch (defect)
+        {
+            case "parameter-missing": parameters.RemoveAt(1); break;
+            case "parameter-extra": parameters.Add(new(parameters[0]) { ["Nombre"] = "Otro" }); break;
+            case "parameter-duplicate": parameters.Add(new(parameters[0])); break;
+            case "parameter-case": parameters[0]["Nombre"] = "paramuno"; break;
+            case "parameter-type": parameters[0]["TipoParametro"] = "nvarchar"; break;
+            case "parameter-type-null": parameters[0]["TipoParametro"] = null; break;
+            case "parameter-quotes": parameters[0]["UsaComillas"] = "0"; break;
+            case "parameter-myvision": parameters[0]["EsMyVision"] = "1"; break;
+            case "parameter-myvision-null": parameters[0]["EsMyVision"] = null; break;
+            case "parameter-audit-user": parameters[0]["User_Create"] = @"EQUIPO\otro"; break;
+            case "parameter-user-update-empty": parameters[0]["User_Update"] = ""; break;
+            case "parameter-date-missing": parameters[0]["F_Create informada"] = "0"; break;
+            case "parameter-order": parameters.Reverse(); break;
+            case "mapping-missing": mappings.RemoveAt(0); break;
+            case "mapping-extra": mappings.Add(new(mappings[0]) { ["Parametro"] = "Otro" }); break;
+            case "mapping-duplicate": mappings.Add(new(mappings[0])); break;
+            case "mapping-duplicate-other-sp": mappings.Add(new(mappings[0]) { ["SP de la vista"] = "0" }); break;
+            case "mapping-other-sp": mappings[0]["SP de la vista"] = "0"; break;
+            case "mapping-other-state": mappings[0]["Estado de la vista"] = "0"; break;
+            case "mapping-other-area": mappings[0]["NombreArea"] = "Area02"; break;
+            case "mapping-variable": mappings[0]["Variable"] = "webControlCombo"; break;
+            case "mapping-variable-null": mappings[0]["Variable"] = null; break;
+            case "mapping-request-null": mappings[0]["VariableRequest"] = null; break;
+            case "mapping-value-trailing-space": mappings[0]["ValorDefault"] = "FIJO-UNO-61 "; break;
+            case "mapping-value-case": mappings[0]["ValorDefault"] = "fijo-uno-61"; break;
+            case "mapping-value-empty": mappings[0]["ValorDefault"] = ""; break;
+            case "mapping-value-null": mappings[0]["ValorDefault"] = null; break;
+            case "mapping-user-update-empty": mappings[0]["User_Update"] = ""; break;
+            case "mapping-order": mappings.Reverse(); break;
+            default: parameters.Clear(); mappings.Clear(); break;
+        }
+        var changed = snapshot with { ParameterRows = parameters, MappingRows = mappings };
+
+        var mismatches = ViewCreationVerifier.Compare(plan, AuditUser, changed.Counts, changed.ValueRows, changed.Values, changed.ParameterRows, changed.MappingRows);
+        var result = ViewCreationService.Decide(plan, AuditUser, Completed(), changed, "https://desagestion.ternium.net");
+
+        Assert.NotEmpty(mismatches);
+        Assert.All(mismatches, mismatch => Assert.StartsWith(defect.StartsWith("mapping", StringComparison.Ordinal) ? "MapeoParametros" : defect == "nothing-read" ? "" : "ParametrosSP", mismatch));
+        Assert.Equal(ViewCreationStatus.Indeterminate, result.Status);
+        Assert.Null(result.ViewId);
+        Assert.Null(result.ViewUrl);
+    }
+
+    [Fact]
+    public void MappingForTheSameStateAreaAndParameterIsADuplicateEvenIfItBelongsToAnotherProcedure()
+    {
+        var plan = ParameterPlan();
+        var snapshot = MatchingSnapshot(plan);
+        // Motor une por estado, área y parámetro con la igualdad de la base: otra capitalización o espacios finales también chocan.
+        foreach (var name in new[] { "ParamUno", "PARAMUNO", "ParamUno  " })
+        {
+            var mappings = snapshot.MappingRows!.Append(new Dictionary<string, string?>(snapshot.MappingRows![0])
+            {
+                ["Parametro"] = name, ["SP de la vista"] = "0", ["ValorDefault"] = "otro"
+            }).ToList();
+
+            var mismatches = ViewCreationVerifier.Compare(plan, AuditUser, snapshot.Counts, 1, snapshot.Values, snapshot.ParameterRows, mappings);
+
+            Assert.Contains(mismatches, mismatch => mismatch.Contains("2 registros para el área «Area01»"));
+            Assert.Contains(mismatches, mismatch => mismatch.Contains(name == "ParamUno" ? "duplicado" : "sobrante"));
+        }
+    }
+
+    [Fact]
+    public void ParameterRowsThatWereNotReadOrThatThePlanDoesNotExpectAreMismatches()
+    {
+        var withParameters = ParameterPlan();
+        var matching = MatchingSnapshot(withParameters);
+        var notRead = ViewCreationVerifier.Compare(withParameters, AuditUser, matching.Counts, 1, matching.Values);
+        Assert.Contains(notRead, mismatch => mismatch.Contains("ParametrosSP «ParamUno»: ausente"));
+        Assert.Contains(notRead, mismatch => mismatch.Contains("MapeoParametros «ParamDos»: ausente"));
+
+        var withoutParameters = GridPlan();
+        var unexpected = MatchingSnapshot(withoutParameters) with { ParameterRows = matching.ParameterRows, MappingRows = matching.MappingRows };
+        var result = ViewCreationService.Decide(withoutParameters, AuditUser, Completed(), unexpected);
+        Assert.Equal(ViewCreationStatus.Indeterminate, result.Status);
+        Assert.Contains(result.Diagnostics, line => line.Contains("ParametrosSP «ParamUno»: sobrante"));
+        Assert.Contains(result.Diagnostics, line => line.Contains("MapeoParametros «ParamUno»: sobrante (Estado de la vista: «1», SP de la vista: «1», NombreArea: «Area01»)"));
+    }
+
+    [Theory]
+    [InlineData("ParametrosSP")]
+    [InlineData("MapeoParametros")]
+    public void LeftoverParameterRecordsAfterARollbackAreNotTreatedAsAbsent(string table)
+    {
+        var plan = ParameterPlan();
+        var absent = AbsentSnapshot(plan);
+        var leftover = absent with { Counts = new Dictionary<string, int>(absent.Counts) { [table] = 1 } };
+        var execution = new ScriptExecution(ScriptExecutionKind.RolledBackByScript, [50000], 1222, 56, TranCountAfter: 0);
+
+        Assert.True(ViewCreationVerifier.IsAbsent(absent.Counts));
+        Assert.False(ViewCreationVerifier.IsAbsent(leftover.Counts));
+        Assert.Equal(ViewCreationStatus.NotCreated, ViewCreationService.Decide(plan, AuditUser, execution, absent).Status);
+        Assert.Equal(ViewCreationStatus.Indeterminate, ViewCreationService.Decide(plan, AuditUser, execution, leftover).Status);
+    }
+
+    private static ViewCreationPlan ParameterPlan()
+    {
+        var plan = GridPlan();
+        return plan with
+        {
+            Grid = plan.Grid! with
+            {
+                Parameters = [new("ParamUno", "varchar", true, "FIJO-UNO-61"), new("ParamDos", "varchar", true, "FIJO-DOS-61")]
+            }
+        };
+    }
+
     private static ViewCreationPlan GridPlan() => new(
         new ViewCreationPlanView("vPrueba", "Descripción de prueba", "go"),
         new ViewCreationPlanState("Estado01", IsDefault: true),
@@ -504,7 +713,8 @@ public sealed class ViewCreationTests
     private static ScriptExecution Completed() => new(ScriptExecutionKind.Completed, [], TranCountAfter: 0);
 
     private static ViewCreationSnapshot MatchingSnapshot(ViewCreationPlan plan) => new(
-        ViewCreationVerifier.ExpectedCounts(plan), 1, ViewCreationVerifier.ExpectedValues(plan, AuditUser));
+        ViewCreationVerifier.ExpectedCounts(plan), 1, ViewCreationVerifier.ExpectedValues(plan, AuditUser),
+        ViewCreationVerifier.ExpectedParameterRows(plan, AuditUser), ViewCreationVerifier.ExpectedMappingRows(plan, AuditUser));
 
     private static ViewCreationSnapshot AbsentSnapshot(ViewCreationPlan plan) => new(
         ViewCreationVerifier.ExpectedCounts(plan).ToDictionary(count => count.Key, _ => 0), 0, null);

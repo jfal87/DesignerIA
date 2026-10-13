@@ -604,196 +604,6 @@ body {
     margin: 0;
 }
 
-/* ---------- Panel central: conmutador entre conversación y vista previa ---------- */
-
-.workspace-tabs {
-    display: flex;
-    gap: 0.25rem;
-    margin-bottom: 0.6rem;
-    border-bottom: 1px solid var(--designeria-color-border);
-}
-
-.workspace-tab {
-    border: none;
-    border-bottom: 2px solid transparent;
-    background: none;
-    padding: 0.4rem 0.85rem;
-    margin-bottom: -1px;
-    font-family: var(--designeria-font-family);
-    font-size: 0.85rem;
-    color: var(--designeria-color-text-muted);
-    cursor: pointer;
-}
-
-.workspace-tab:hover {
-    color: var(--designeria-color-primary-dark);
-}
-
-.workspace-tab-active {
-    border-bottom-color: var(--designeria-color-primary);
-    color: var(--designeria-color-primary-dark);
-    font-weight: 600;
-}
-
-.chat-conversation {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-}
-
-.chat-conversation[hidden] {
-    display: none;
-}
-
-/* ---------- Vista previa simulada de la vista en progreso ---------- */
-
-.viewpreview {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-}
-
-.viewpreview-label {
-    align-self: flex-start;
-    padding: 0.2rem 0.65rem;
-    border: 1px solid var(--designeria-color-warning);
-    border-radius: 999px;
-    background-color: var(--designeria-color-warning-bg);
-    color: var(--designeria-color-warning);
-    font-size: 0.78rem;
-    font-weight: 600;
-}
-
-.viewpreview-empty-state {
-    padding: 2rem 1rem;
-}
-
-.viewpreview-frame {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-    padding: 0.9rem;
-    border: 1px solid var(--designeria-color-border);
-    border-radius: var(--designeria-radius);
-    background-color: var(--designeria-color-surface);
-}
-
-.viewpreview-header {
-    padding-bottom: 0.6rem;
-    border-bottom: 1px solid var(--designeria-color-border);
-}
-
-.viewpreview-title {
-    font-size: 1.15rem;
-    font-weight: 600;
-    color: var(--designeria-color-primary-dark);
-    overflow-wrap: anywhere;
-}
-
-.viewpreview-description {
-    font-size: 0.9rem;
-    color: var(--designeria-color-text);
-    overflow-wrap: anywhere;
-}
-
-.viewpreview-meta {
-    font-size: 0.75rem;
-    color: var(--designeria-color-text-muted);
-    overflow-wrap: anywhere;
-}
-
-.viewpreview-level {
-    font-size: 0.78rem;
-    color: var(--designeria-color-text-muted);
-    margin-bottom: 0.4rem;
-    overflow-wrap: anywhere;
-}
-
-.viewpreview-level strong {
-    color: var(--designeria-color-text);
-}
-
-.viewpreview-state {
-    padding: 0.7rem;
-    border: 1px solid var(--designeria-color-border);
-    border-radius: var(--designeria-radius-sm);
-    background-color: var(--designeria-color-surface-muted);
-}
-
-.viewpreview-row {
-    padding: 0.6rem;
-    border: 1px dashed var(--designeria-color-border);
-    border-radius: var(--designeria-radius-sm);
-    background-color: var(--designeria-color-surface);
-}
-
-.viewpreview-row + .viewpreview-row {
-    margin-top: 0.6rem;
-}
-
-.viewpreview-areas {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.6rem;
-}
-
-.viewpreview-area {
-    flex: 1 1 320px;
-    min-width: 0;
-    padding: 0.6rem;
-    border: 1px solid var(--designeria-color-border);
-    border-radius: var(--designeria-radius-sm);
-    background-color: var(--designeria-color-surface);
-}
-
-.viewpreview-grid-scroll {
-    overflow-x: auto;
-    border: 1px solid var(--designeria-color-border);
-    border-radius: var(--designeria-radius-sm);
-}
-
-.viewpreview-grid {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.82rem;
-}
-
-.viewpreview-grid th,
-.viewpreview-grid td {
-    padding: 0.4rem 0.6rem;
-    text-align: left;
-    white-space: nowrap;
-    border-bottom: 1px solid var(--designeria-color-border);
-}
-
-.viewpreview-grid th {
-    background-color: var(--designeria-color-surface-muted);
-    color: var(--designeria-color-primary-dark);
-    font-weight: 600;
-}
-
-.viewpreview-grid tbody tr:last-child td {
-    border-bottom: none;
-}
-
-.viewpreview-note {
-    margin: 0.4rem 0;
-    font-size: 0.75rem;
-    font-style: italic;
-    color: var(--designeria-color-warning);
-    overflow-wrap: anywhere;
-}
-
-.viewpreview-placeholder {
-    padding: 0.85rem;
-    border: 1px dashed var(--designeria-color-border);
-    border-radius: var(--designeria-radius-sm);
-    text-align: center;
-    font-size: 0.82rem;
-    color: var(--designeria-color-text-muted);
-}
-
 /* ---------- Creación de la vista: confirmación y resultado ---------- */
 
 .viewcreation-confirm {
@@ -878,36 +688,6 @@ body {
 }
 
 /* ---------- Modals (Enseñar a DesignerIA / Laboratorio de conocimiento) ---------- */
-
-.view-template-card {
-    display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
-    border: 1px solid var(--designeria-color-border);
-    border-radius: var(--designeria-radius-sm);
-    padding: 0.85rem;
-    background-color: var(--designeria-color-surface);
-    font-family: inherit;
-    text-align: left;
-    cursor: pointer;
-}
-
-.view-template-card:hover,
-.view-template-card:focus-visible {
-    border-color: var(--designeria-color-primary);
-    background-color: var(--designeria-color-surface-muted);
-}
-
-.view-template-title {
-    font-size: 0.9rem;
-    font-weight: 600;
-    color: var(--designeria-color-primary-dark);
-}
-
-.view-template-description {
-    font-size: 0.82rem;
-    color: var(--designeria-color-text-muted);
-}
 
 .modal-overlay {
     position: fixed;
@@ -1068,6 +848,498 @@ body {
 
 .result-card-body {
     font-size: 0.95rem;
+}
+
+/* ---------- Creación desde JSON: borrador efectivo y diagnósticos ---------- */
+
+.modal-dialog-json {
+    width: 46rem;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.modal-dialog-json .modal-body {
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.modal-dialog-json .modal-body > * {
+    flex-shrink: 0;
+}
+
+.modal-dialog-json .modal-title,
+.modal-dialog-json .modal-actions,
+.modal-dialog-json > .viewcreation-confirm {
+    flex-shrink: 0;
+}
+
+.modal-dialog-json .modal-actions {
+    flex-wrap: wrap;
+}
+
+.jsonmeta-summary {
+    font-size: 0.85rem;
+    font-weight: 600;
+    border-radius: var(--designeria-radius-sm);
+    padding: 0.5rem;
+    margin-top: 0.4rem;
+}
+
+.jsonmeta-summary-ok {
+    color: var(--designeria-color-success);
+    background-color: var(--designeria-color-success-bg);
+}
+
+.jsonmeta-summary-pending {
+    color: var(--designeria-color-warning);
+    background-color: var(--designeria-color-warning-bg);
+}
+
+.jsonmeta-section-title {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--designeria-color-primary-dark);
+    margin-top: 0.6rem;
+}
+
+.jsonmeta-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    font-size: 0.8rem;
+}
+
+.jsonmeta-list li {
+    border-left: 3px solid var(--designeria-color-border);
+    padding-left: 0.5rem;
+}
+
+.jsonmeta-badge {
+    display: inline-block;
+    border-radius: 999px;
+    padding: 0.05rem 0.5rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    margin-right: 0.35rem;
+}
+
+.jsonmeta-badge-error {
+    color: var(--designeria-color-error);
+    background-color: var(--designeria-color-error-bg);
+}
+
+.jsonmeta-badge-warning {
+    color: var(--designeria-color-warning);
+    background-color: var(--designeria-color-warning-bg);
+}
+
+.jsonmeta-badge-ok {
+    color: var(--designeria-color-success);
+    background-color: var(--designeria-color-success-bg);
+}
+
+.jsonmeta-badge-muted {
+    color: var(--designeria-color-pending);
+    background-color: var(--designeria-color-pending-bg);
+}
+
+.jsonmeta-path {
+    font-size: 0.75rem;
+    word-break: break-all;
+}
+
+.jsonmeta-needed,
+.jsonmeta-received {
+    color: var(--designeria-color-text-muted);
+    word-break: break-word;
+}
+
+.jsonmeta-received {
+    font-size: 0.75rem;
+}
+
+.jsonmeta-document {
+    border: 1px solid var(--designeria-color-border);
+    border-radius: var(--designeria-radius-sm);
+    padding: 0.5rem;
+    background-color: var(--designeria-color-surface-muted);
+}
+
+.jsonmeta-script .jsonmeta-document {
+    min-height: 12rem;
+    max-height: 24rem;
+    overflow: auto;
+    margin-top: 0.4rem;
+}
+
+.jsonmeta-editor {
+    border: 0;
+    padding: 0;
+    margin: 0.8rem 0;
+    min-width: 0;
+}
+
+.jsonmeta-editor legend {
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+
+.jsonmeta-editor-tabs,
+.jsonmeta-editor-item-heading,
+.jsonmeta-editor-empty,
+.jsonmeta-editor-reference {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    justify-content: space-between;
+    flex-wrap: wrap;
+}
+
+.jsonmeta-editor-tabs {
+    justify-content: flex-start;
+    margin: 0.6rem 0;
+}
+
+.jsonmeta-editor-tabs button[aria-pressed="true"] {
+    background: var(--designeria-color-primary);
+    color: white;
+}
+
+.jsonmeta-editor-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin: 0.5rem 0;
+    min-width: 0;
+}
+
+.jsonmeta-editor-group {
+    background: var(--designeria-color-surface-muted);
+    padding: 0.6rem;
+    border-radius: var(--designeria-radius-sm);
+    margin: 0.4rem 0;
+    min-width: 0;
+}
+
+.jsonmeta-editor-group summary {
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.jsonmeta-editor-item {
+    padding: 0.5rem;
+    margin: 0.5rem 0;
+    background: var(--designeria-color-surface);
+    border-radius: var(--designeria-radius-sm);
+}
+
+.jsonmeta-editor-link {
+    border: 0;
+    background: transparent;
+    color: var(--designeria-color-primary);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.8rem;
+    padding: 0.25rem;
+}
+
+.jsonmeta-editor-link:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.jsonmeta-editor-diagnostic {
+    color: #a42b24;
+    font-size: 0.8rem;
+    margin: 0.3rem 0;
+}
+
+.jsonmeta-editor-json {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 20rem;
+    font-family: Consolas, monospace;
+}
+
+.jsonmeta-editor-preserved {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 0.8rem;
+}
+
+.jsonmeta-editor-reference input {
+    flex: 1;
+    min-width: 5rem;
+}
+
+/* ---------- Preparación de vistas en el espacio central ---------- */
+
+.workspace-content > [hidden] {
+    display: none !important;
+}
+
+.workspace-nav-button {
+    border: 1px solid var(--designeria-color-border);
+    border-radius: var(--designeria-radius-sm);
+    background: var(--designeria-color-surface);
+    color: var(--designeria-color-text);
+    padding: 0.75rem 1rem;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.workspace-nav-selected {
+    background: var(--designeria-color-surface-muted);
+    color: var(--designeria-color-primary-dark);
+    font-weight: 600;
+}
+
+.workspace-nav-button:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.workspace-content-editor {
+    grid-template-columns: 200px minmax(0, 1fr);
+    max-width: 1600px;
+}
+
+.workspace-content-editor .jsonmeta-workspace-host {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+}
+
+.workspace-content-assistant {
+    grid-template-columns: 200px minmax(0, 1fr) 320px;
+}
+
+.workspace-content-focus {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.workspace-content-focus > .nav-rail {
+    display: none;
+}
+
+.workspace-content-focus .jsonmeta-workspace-host {
+    grid-column: 1;
+}
+
+.jsonmeta-workspace {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    height: calc(100vh - 9rem);
+    min-height: 34rem;
+    border: 1px solid var(--designeria-color-border);
+    border-radius: var(--designeria-radius);
+    background: var(--designeria-color-surface);
+    padding: 1.25rem;
+}
+
+.jsonmeta-workspace-heading,
+.jsonmeta-workspace-actions,
+.jsonmeta-code-heading,
+.jsonmeta-code-tools {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.8rem;
+    flex-wrap: wrap;
+}
+
+.jsonmeta-workspace-heading h1,
+.jsonmeta-code-heading h2 {
+    margin: 0;
+    font-size: 1.2rem;
+    color: var(--designeria-color-primary-dark);
+    overflow-wrap: anywhere;
+}
+
+.jsonmeta-code-heading h2 {
+    font-size: 1rem;
+}
+
+.jsonmeta-workspace-caption {
+    color: var(--designeria-color-text-muted);
+    font-size: 0.8rem;
+    margin-top: 0.25rem;
+    overflow-wrap: anywhere;
+}
+
+.jsonmeta-workspace-tools,
+.jsonmeta-workspace-tabs {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.jsonmeta-workspace-tabs {
+    margin-top: 1rem;
+    padding-bottom: 0.8rem;
+    border-bottom: 1px solid var(--designeria-color-border);
+}
+
+.jsonmeta-workspace-tabs button[aria-pressed="true"] {
+    background: var(--designeria-color-primary);
+    color: white;
+}
+
+.jsonmeta-workspace-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 0.8rem 0.3rem 0.8rem 0;
+}
+
+.jsonmeta-workspace-actions {
+    border-top: 1px solid var(--designeria-color-border);
+    padding-top: 0.8rem;
+}
+
+.jsonmeta-workspace .jsonmeta-editor {
+    margin-top: 0;
+}
+
+.jsonmeta-workspace-body > .modal-label {
+    display: block;
+    margin-bottom: 0.3rem;
+}
+
+.jsonmeta-code-tools {
+    margin: 0.5rem 0;
+}
+
+.jsonmeta-code-tools select {
+    max-width: min(28rem, 100%);
+    display: block;
+    margin-top: 0.3rem;
+}
+
+.jsonmeta-code-tools label {
+    max-width: 100%;
+    min-width: 0;
+}
+
+.jsonmeta-code-editor {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 22rem;
+    height: 48vh;
+    font: 0.85rem/1.6 Consolas, "Cascadia Code", monospace;
+    tab-size: 4;
+    white-space: pre;
+}
+
+.jsonmeta-workspace-expanded .jsonmeta-code-editor {
+    height: 55vh;
+}
+
+.chat-panel-assistant {
+    border: 1px solid var(--designeria-color-border);
+    border-radius: var(--designeria-radius);
+    background: var(--designeria-color-surface);
+    padding: 1rem;
+    box-sizing: border-box;
+    height: calc(100vh - 9rem);
+    min-height: 34rem;
+}
+
+.jsonmeta-assistant-heading {
+    font-weight: 600;
+    color: var(--designeria-color-primary-dark);
+    margin-bottom: 0.25rem;
+}
+
+.chat-panel-assistant .chat-scroll {
+    margin-top: 0.75rem;
+}
+
+@media (max-width: 1200px) {
+    .workspace-content-assistant {
+        grid-template-columns: minmax(0, 1fr) 300px;
+    }
+
+    .workspace-content-assistant > .nav-rail {
+        grid-column: 1 / -1;
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
+
+    .workspace-content-assistant .nav-rail-placeholder,
+    .workspace-content-assistant .nav-rail-secondary {
+        display: none;
+    }
+
+    .workspace-content-assistant .jsonmeta-workspace-host {
+        grid-column: 1;
+        grid-row: 2;
+    }
+}
+
+@media (max-width: 1100px) {
+    .workspace-content > .nav-rail {
+        grid-column: 1 / -1;
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
+
+    .workspace-content .nav-rail-placeholder,
+    .workspace-content .nav-rail-secondary {
+        display: none;
+    }
+
+    .workspace-content-editor {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .workspace-content-editor .jsonmeta-workspace-host {
+        grid-column: 1;
+        grid-row: auto;
+    }
+
+    .workspace-content-assistant {
+        grid-template-columns: minmax(0, 1fr) 300px;
+    }
+
+    .workspace-content-assistant .jsonmeta-workspace-host {
+        grid-row: 2;
+    }
+}
+
+@media (max-width: 760px) {
+    .workspace-content-editor,
+    .workspace-content-assistant {
+        grid-template-columns: minmax(0, 1fr);
+        padding: 1rem;
+    }
+
+    .workspace-content-editor .jsonmeta-workspace-host {
+        grid-row: auto;
+    }
+
+    .jsonmeta-workspace {
+        padding: 0.85rem;
+        height: auto;
+        min-height: 34rem;
+    }
+
+    .jsonmeta-workspace-body {
+        overflow: visible;
+    }
+
+    .chat-panel-assistant {
+        height: 32rem;
+        min-height: 0;
+    }
 }
 
 /* ---------- Status badges ---------- */

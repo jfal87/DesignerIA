@@ -1,8 +1,12 @@
 # DesignerIA — Contexto del producto y acuerdos
 
+> **Estado al 13 de octubre de 2026:** leer primero [Base consolidada y continuidad](DesignerIA-Checkpoint-Base-2026-10-13.md). La edición ahora ocurre en un espacio central; el modal sólo selecciona el archivo. JSONMetadata ya materializa navegación y JS de vista. Ese checkpoint distingue la conversación RAG actual de la integración futura con el borrador y conserva las referencias de inspiración.
+
 Fecha del acuerdo: 10 de octubre de 2026.
 
 Este documento explica qué estamos construyendo. El orden de entregas y el encargo del primer análisis están en `DesignerIA-Roadmap.md`. Ambos sirven como contexto inicial para nuevos chats con Codex o Claudio; no hace falta transportar toda la conversación anterior.
+
+> **Cambio de dirección, 11 de octubre de 2026.** La creación pasa a hacerse desde un archivo JSONMetadata; Word, TXT y lenguaje natural deberán producir ese mismo documento más adelante. Dejan de estar vigentes: la sección 3 («ViewSpec representado en JSON» como definición común; la propuesta actual es sustituirlo en la creación, ver `DesignerIA-JSONMetadata-Contrato.md`), la sección 5 (galería, popup y panel de vista previa) y la plantilla de la sección 6. Las secciones 1, 2, 4, 7 y 8 siguen siendo contexto válido. El formulario, la plantilla y la vista previa se retiraron del producto ese día.
 
 ## 1. Necesidad del cliente
 
@@ -146,6 +150,17 @@ Fuentes de dominio principales en `C:\Code\DesignerAI\KnowledgeSource`:
 El proyecto ChatGPT también proporciona `Designer.zip`, `Motor.zip` y los SQL bajo `sources/`. Esa carpeta es de sólo lectura. Si un nuevo chat no tiene esos archivos, debe señalar la falta; no asumir que hereda adjuntos de otro chat.
 
 Se realizaron lecturas de código y consultas locales de metadata. No se ha implementado este flujo, aplicado scripts ni probado el render de Motor. La incorporación del esquema a KnowledgeSource fue una copia de referencia, no un cambio de producto. No se reconstruyó el índice después de esa copia.
+
+### Actualización del 11 de octubre de 2026
+
+Esta sección describe el estado del día 10. Para el estado actual prevalece `DesignerIA-Fase05-Checkpoint.md`. Cambios respecto de lo anterior:
+
+- **Decisión del usuario, 11 de octubre de 2026.** Acepta el cierre funcional de las fases 4 y 5 para el alcance probado y registra **V1 como entregada con una reserva de validación integrada**. El criterio de la sección 6 —crear automáticamente la vista y devolver su URL— se conserva como referencia.
+- **El flujo está implementado.** La plantilla, la generación, la creación desde la API y la Web, la verificación y la devolución de URL existen. La creación automática se comprobó en el ambiente local.
+- **Un script se aplicó y Motor lo mostró.** El script generado por DesignerIA se aplicó manualmente en desarrollo; la vista `vDesignerIATest01` se abrió en Designer y mostró su grilla con datos en Motor. La evidencia son capturas y la URL que el usuario compartió en el chat; no está archivada en el repositorio.
+- **La URL quedó definida.** El patrón confirmado es `{baseMotor}/GestionEngine/DefaultV2.aspx?Limpiarcache={IdVista codificado}&StyleVersion=V2`, y sustituye al patrón tentativo citado arriba. La base de Motor es configurable y se activa junto con la conexión SQL del mismo ambiente.
+- **La vista previa está en el panel central**, como pestaña «Vista previa», no en el panel derecho. Es una simulación con datos de ejemplo.
+- **Reserva pendiente.** Crear automáticamente con Motor configurado, recibir IdVista y URL reales y abrir la vista mediante «Abrir vista». No se ha ejecutado y no bloquea el cierre aceptado. El ambiente local sigue sin Motor.
 
 ## 8. Filosofía de implementación
 
